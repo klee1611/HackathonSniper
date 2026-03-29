@@ -1,0 +1,73 @@
+{
+  "name": "hackathon-discovery-agent",
+  "version": "2.0.0",
+  "description": "AI-powered hackathon discovery and evaluation agent - Node.js/TypeScript version",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "build:watch": "tsc --project tsconfig.build.json --watch",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/src/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:mock": "NODE_ENV=test jest --config=jest.mock.config.js",
+    "pipeline:test": "tsx scripts/test-runner.ts",
+    "lint": "eslint src/ tests/ --ext .ts,.tsx",
+    "lint:fix": "eslint src/ tests/ --ext .ts,.tsx --fix",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write src/ tests/ scripts/",
+    "format:check": "prettier --check src/ tests/ scripts/",
+    "setup:dev": "tsx scripts/setup.ts",
+    "clean": "rm -rf dist/ coverage/ .nyc_output/"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@notionhq/client": "^5.15.0",
+    "date-fns": "^3.0.6",
+    "dotenv": "^16.3.1",
+    "groq-sdk": "^0.7.0",
+    "winston": "^3.11.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@notionhq/notion-mcp-server": "^2.2.1",
+    "@types/jest": "^29.5.8",
+    "@types/node": "^20.9.0",
+    "@typescript-eslint/eslint-plugin": "^6.12.0",
+    "@typescript-eslint/parser": "^6.12.0",
+    "brave-search-mcp": "^2.1.0",
+    "eslint": "^8.54.0",
+    "eslint-config-prettier": "^9.0.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.1.0",
+    "ts-jest": "^29.1.1",
+    "tsx": "^4.6.0",
+    "typescript": "^5.3.2"
+  },
+  "keywords": [
+    "hackathon",
+    "ai",
+    "automation",
+    "notion",
+    "mcp",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/hackathon-discovery-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/hackathon-discovery-agent/issues"
+  },
+  "homepage": "https://github.com/your-username/hackathon-discovery-agent#readme",
+  "license": "MIT"
+}
