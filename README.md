@@ -1,4 +1,4 @@
-# 🎯 Hackathon Discovery Agent
+# 🎯 Hackathon Sniper
 
 A sophisticated TypeScript agent that automatically discovers, evaluates, and tracks hackathons using AI-powered analysis. Built with clean architecture patterns, **real MCP server integration**, and complete environment separation.
 
