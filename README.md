@@ -1,18 +1,20 @@
-# 🎯 Hackathon Sniper
+# Hackathon Sniper 🎯 — AI-Powered Hackathon Discovery Agent
 
-A sophisticated TypeScript agent that automatically discovers, evaluates, and tracks hackathons using AI-powered analysis. Built with clean architecture patterns, **real MCP server integration**, and complete environment separation.
+> **Hackathon Sniper** is a TypeScript agent that automatically discovers, evaluates, and tracks hackathons using AI-powered analysis, real MCP server integration, and strict environment separation. Point it at the web; it returns only the hackathons worth entering.
 
-## ✨ Features
+**What it does in one sentence:** Hackathon Sniper searches the web for hackathons, scores each one against your criteria with a Groq-powered AI evaluator, and saves qualified results directly to a Notion database — all in a single command.
 
-- **🔍 Intelligent Search** - Real Brave Search MCP server integration
-- **🤖 AI Evaluation** - Groq-powered hackathon qualification analysis
-- **📊 Notion Integration** - Real Notion MCP server for storage and tracking
-- **🎭 Test Isolation** - Complete environment isolation for testing (zero external dependencies)
-- **⚡ Fast Development** - Hot reload, comprehensive Makefile, pnpm package management
-- **🛡️ Type Safety** - End-to-end TypeScript with Zod schema validation
-- **🧪 Robust Testing** - Unit, integration, and smoke tests
+## Features ✨
 
-## 🚀 Quick Start
+- **Intelligent Search 🔍** — Real Brave Search MCP server integration
+- **AI Evaluation 🤖** — Groq-powered hackathon qualification analysis
+- **Notion Integration 📊** — Real Notion MCP server for storage and tracking
+- **Test Isolation 🎭** — Complete environment isolation for testing (zero external dependencies)
+- **Fast Development ⚡** — Hot reload, comprehensive Makefile, pnpm package management
+- **Type Safety 🛡️** — End-to-end TypeScript with Zod schema validation
+- **Robust Testing 🧪** — Unit, integration, and smoke tests
+
+## Quick Start 🚀
 
 ### Prerequisites
 - Node.js 18+
@@ -49,7 +51,7 @@ make type-check
 make clean
 ```
 
-## 🏗️ Architecture
+## Architecture 🏗️
 
 ### Environment Separation (Clean Architecture)
 
@@ -92,7 +94,7 @@ tests/                           # Test code only
 └── integration/                 # Integration tests
 ```
 
-## ⚙️ Configuration
+## Configuration ⚙️
 
 ### Environment Variables
 
@@ -117,7 +119,7 @@ TEST_QUERY="AI hackathon 2026"
 
 **Note**: Test environment (`NODE_ENV=test`) automatically uses mocks - no configuration needed.
 
-## 🧪 Testing Strategy
+## Testing Strategy 🧪
 
 ### Proper Test Naming & Separation
 
@@ -153,7 +155,7 @@ export async function createMCPClient(config: AgentConfig): Promise<IMCPClient> 
 }
 ```
 
-## 🎯 Hackathon Filtering Criteria
+## Hackathon Filtering Criteria 🎯
 
 The agent intelligently filters hackathons based on:
 
@@ -163,7 +165,11 @@ The agent intelligently filters hackathons based on:
 - **🤖 AI Related** - Matches AI/ML themes
 - **📝 Quality** - Complete information available
 
-## 📊 Pipeline Results
+## Demo 🎬
+
+[![Hackathon Sniper — Live Demo](https://img.youtube.com/vi/eGlTIzBa2hI/maxresdefault.jpg)](https://youtu.be/eGlTIzBa2hI)
+
+## Pipeline Results 📊
 
 Example successful pipeline execution:
 
@@ -186,7 +192,7 @@ Console output shows complete pipeline execution:
 🎉 Pipeline completed successfully
 ```
 
-## 🛠️ Available Commands
+## Available Commands 🛠️
 
 ### Testing Commands
 | Command | Description | Environment |
@@ -216,7 +222,7 @@ Console output shows complete pipeline execution:
 | `make status` | Show project status |
 | `make help` | Show all available commands |
 
-## 🔧 MCP Server Integration
+## MCP Server Integration 🔧
 
 ### Automatic Server Management
 
@@ -248,7 +254,7 @@ const braveTransport = new StdioClientTransport({
 - **Cleanup** - Processes terminated when client disconnects
 - **Error Handling** - Automatic reconnection and retries
 
-## 🚀 What Makes This Architecture Special
+## What Makes This Architecture Special 🚀
 
 ### Clean Environment Separation
 - **Automatic mock selection** - Based on NODE_ENV only
@@ -268,7 +274,7 @@ const braveTransport = new StdioClientTransport({
 - **Type safety** - Full TypeScript integration
 - **Hot reload** - Fast development iteration
 
-## 🐛 Troubleshooting
+## Troubleshooting 🐛
 
 ### Environment Issues
 
@@ -309,7 +315,7 @@ make clean
 make setup
 ```
 
-## 📈 Performance Metrics
+## Performance Metrics 📈
 
 - **MCP Server Startup**: ~2-3 seconds (auto-spawned)
 - **Search Phase**: ~2-5 seconds (via Brave MCP)
@@ -318,7 +324,7 @@ make setup
 - **Total Pipeline**: ~10-20 seconds for typical batch
 - **Test Suite**: ~7 seconds (with mocks - zero dependencies)
 
-## 🎉 Architecture Benefits
+## Architecture Benefits 🎉
 
 ### Environment-Driven Design:
 ```
@@ -339,7 +345,29 @@ App ←→ MCP SDK ←→ MCP Server ←→ External API
 - **Extensibility** - Easy to add new MCP servers
 - **Tool calling** - Standard interface for AI agents
 
-## 🤝 Contributing
+## Frequently Asked Questions
+
+**What is Hackathon Sniper?**
+Hackathon Sniper is an open-source TypeScript CLI agent that searches the web for hackathons, evaluates each one using an AI model (Groq), and saves qualifying events to a Notion database automatically.
+
+**Do I need to pay for any APIs?**
+Brave Search, Groq, and Notion all offer free tiers sufficient for personal use. You need API keys for each service; see [Configuration](#configuration-️) for setup instructions.
+
+**What does "MCP integration" mean?**
+MCP (Model Context Protocol) is an open standard for connecting AI agents to external services. Hackathon Sniper spawns official Brave Search and Notion MCP servers as child processes, so it talks to those services through a standardised interface rather than direct HTTP calls.
+
+**Can I run the project without API keys?**
+Yes — set `NODE_ENV=test` (or run `make test-unit`) and the agent uses mock services automatically. No API keys are required for the full test suite.
+
+**How does the AI decide which hackathons qualify?**
+The Groq-powered evaluator checks five criteria: registration deadline has not passed, prize value meets your minimum threshold, solo participation is allowed, the event relates to AI/ML themes, and complete information is available. All five criteria must be met for a hackathon to be stored.
+
+**How do I add a new MCP server (e.g., GitHub)?**
+Create a new transport in `src/mcp/`, register it in `MCPClientManager`, add a corresponding mock in `tests/mocks/`, and extend `AgentConfig` with any required environment variables. Follow the existing Notion or Brave patterns as a template.
+
+## Contributing 🤝
+
+Contributions that add new MCP server integrations, improve AI evaluation criteria, or extend the filtering logic are especially welcome.
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature-name`
@@ -348,7 +376,7 @@ App ←→ MCP SDK ←→ MCP Server ←→ External API
 5. Build: `make build`
 6. Submit a pull request
 
-## 📝 License
+## License 📝
 
 MIT License - see LICENSE file for details.
 
