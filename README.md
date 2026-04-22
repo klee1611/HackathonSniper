@@ -53,6 +53,8 @@ make clean
 
 ## Architecture 🏗️
 
+![HackathonSniper Architecture](assets/HackathonSniper%20Architecture.png)
+
 ### Environment Separation (Clean Architecture)
 
 The agent follows **strict environment separation**:
