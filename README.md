@@ -14,6 +14,10 @@
 - **Type Safety 🛡️** — End-to-end TypeScript with Zod schema validation
 - **Robust Testing 🧪** — Unit, integration, and smoke tests
 
+## Demo 🎬
+
+[![Hackathon Sniper — Live Demo](https://img.youtube.com/vi/eGlTIzBa2hI/maxresdefault.jpg)](https://youtu.be/eGlTIzBa2hI)
+
 ## Quick Start 🚀
 
 ### Prerequisites
@@ -52,6 +56,8 @@ make clean
 ```
 
 ## Architecture 🏗️
+
+![HackathonSniper Architecture](assets/HackathonSniper%20Architecture.png)
 
 ### Environment Separation (Clean Architecture)
 
@@ -164,10 +170,6 @@ The agent intelligently filters hackathons based on:
 - **👤 Solo Friendly** - Individual participation allowed
 - **🤖 AI Related** - Matches AI/ML themes
 - **📝 Quality** - Complete information available
-
-## Demo 🎬
-
-[![Hackathon Sniper — Live Demo](https://img.youtube.com/vi/eGlTIzBa2hI/maxresdefault.jpg)](https://youtu.be/eGlTIzBa2hI)
 
 ## Pipeline Results 📊
 
