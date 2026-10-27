@@ -416,3 +416,39 @@ def test_create_without_id_raises() -> None:
     respx.post(f"{BASE}/pages").mock(return_value=httpx.Response(200, json={}))
     with pytest.raises(NotionError, match="id"):
         gateway().create_page("db1", {})
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "error", [httpx.ConnectError("refused"), httpx.ConnectTimeout("t"), httpx.PoolTimeout("t")]
+)
+def test_creates_are_retried_when_request_was_never_sent(error: httpx.TransportError) -> None:
+    sleeps: list[float] = []
+    route = respx.post(f"{BASE}/pages").mock(
+        side_effect=[error, httpx.Response(200, json={"id": "x"})]
+    )
+    assert gateway(sleeps).create_page("db1", {}) == "x"
+    assert route.call_count == 2
+    assert sleeps == [1.0]
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "error",
+    [httpx.ReadTimeout("t"), httpx.WriteTimeout("t"), httpx.RemoteProtocolError("t")],
+)
+def test_creates_are_not_retried_when_request_may_have_been_sent(
+    error: httpx.TransportError,
+) -> None:
+    route = respx.post(f"{BASE}/pages").mock(
+        side_effect=[error, httpx.Response(200, json={"id": "x"})]
+    )
+    with pytest.raises(NotionError, match=type(error).__name__):
+        gateway().create_page("db1", {})
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("bad", [None, 123, b"p1", ["p1"]])
+def test_rejects_non_string_ids(bad: object) -> None:
+    with pytest.raises(NotionError, match="invalid"):
+        gateway().get_page(bad)  # type: ignore[arg-type]

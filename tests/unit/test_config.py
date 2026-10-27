@@ -70,3 +70,11 @@ def test_shell_env_does_not_leak_into_factories() -> None:
     # conftest clears Settings env vars, so e.g. SEARCH_PROVIDER=serpapi in the shell is ignored.
     s = make_settings()
     assert (s.search_provider, s.max_verify) == ("brave", 25)
+
+
+def test_strips_surrounding_whitespace_from_string_settings(env: pytest.MonkeyPatch) -> None:
+    env.setenv("BRAVE_API_KEY", " b\n")
+    env.setenv("NOTION_HACKATHONS_DB_ID", "abc\n")
+    s = Settings(_env_file=None)
+    assert s.notion_hackathons_db_id == "abc"
+    assert s.brave_api_key == "b"

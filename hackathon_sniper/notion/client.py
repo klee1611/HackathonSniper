@@ -12,6 +12,8 @@ _RETRYABLE = frozenset({429, 502, 503, 504})
 # A 502/504 or a transport error may arrive after the write landed: never resend a create.
 _RETRYABLE_UNSAFE = frozenset({429})
 _MAX_DELAY = 60.0
+# The connection was never established, so the request never left: safe to resend anything.
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 _REDACTED = "REDACTED"
 _ID = re.compile(r"[A-Za-z0-9-]+")
 
@@ -36,8 +38,8 @@ def _created_id(data: dict[str, Any]) -> str:
 
 def _id(value: str) -> str:
     """Refuse IDs that could steer a request to another endpoint (`/`, `?`, `..`)."""
-    if not _ID.fullmatch(value):
-        raise NotionError(f"invalid Notion id: {value[:64]!r}")
+    if not isinstance(value, str) or not _ID.fullmatch(value):
+        raise NotionError(f"invalid Notion id: {repr(value)[:64]}")
     return value
 
 
@@ -109,7 +111,7 @@ class NotionGateway:
                     follow_redirects=False,  # never send the token to another origin
                 )
             except httpx.TransportError as e:
-                if idempotent and not last:
+                if (idempotent or isinstance(e, _NOT_SENT)) and not last:
                     self.sleep(self._backoff(attempt))
                     continue
                 failure = f"{type(e).__name__}: {e}"
