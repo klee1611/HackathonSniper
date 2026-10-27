@@ -1,11 +1,13 @@
 from typing import Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", env_ignore_empty=True, hide_input_in_errors=True
+    )
 
     groq_api_key: str
     groq_model: str = "llama-3.3-70b-versatile"
@@ -20,12 +22,12 @@ class Settings(BaseSettings):
     serpapi_api_key: str | None = None
 
     mlh_season: str = "2027"
-    max_queries: int = 10
-    results_per_query: int = 10
-    max_verify: int = 25
-    llm_call_budget: int = 60
-    llm_concurrency: int = 2
-    reverify_after_days: int = 7
+    max_queries: int = Field(default=10, ge=1)
+    results_per_query: int = Field(default=10, ge=1)
+    max_verify: int = Field(default=25, ge=0)
+    llm_call_budget: int = Field(default=60, ge=1)
+    llm_concurrency: int = Field(default=2, ge=1)
+    reverify_after_days: int = Field(default=7, ge=0)
     dry_run: bool = False
 
     @model_validator(mode="after")
