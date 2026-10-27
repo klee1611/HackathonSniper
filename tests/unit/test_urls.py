@@ -1,6 +1,6 @@
 import pytest
 
-from hackathon_sniper.urls import canonicalize
+from hackathon_sniper.urls import canonicalize, try_canonicalize
 
 
 def test_strips_tracking_www_fragment_and_trailing_slash() -> None:
@@ -33,3 +33,11 @@ def test_empty_host_raises() -> None:
         canonicalize("")
     with pytest.raises(ValueError, match="no host"):
         canonicalize("/path")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(None, None), ("", None), ("/path", None), ("https://www.x.com/", "https://x.com")],
+)
+def test_try_canonicalize_never_raises(raw: str | None, expected: str | None) -> None:
+    assert try_canonicalize(raw) == expected

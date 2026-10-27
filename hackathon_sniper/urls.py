@@ -18,3 +18,13 @@ def canonicalize(url: str) -> str:
     path = parts.path.rstrip("/")
     query = urlencode(sorted((k, v) for k, v in parse_qsl(parts.query) if not _TRACKING.match(k)))
     return urlunsplit(("https", host, path, query, ""))
+
+
+def try_canonicalize(url: str | None) -> str | None:
+    """Like canonicalize, but returns None instead of raising (for untrusted LLM URLs)."""
+    if not url or not isinstance(url, str):
+        return None
+    try:
+        return canonicalize(url)
+    except ValueError:
+        return None

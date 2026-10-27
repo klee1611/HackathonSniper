@@ -49,7 +49,10 @@ class Origin(IntEnum):
     PAGE = 3
 
 
-_NUMBER = re.compile(r"(-?)(\d[\d,]*(?:\.\d+)?)\s*([kKmM](?![A-Za-z]))?")
+_AMOUNT = r"(\d[\d,]*(?:\.\d+)?)\s*([kKmM](?![A-Za-z]))?"
+_NUMBER = re.compile(r"(-?)" + _AMOUNT)
+_CURRENCY_NUMBER = re.compile(r"(?:\$|\bUSD)\s*" + _AMOUNT)
+_MAX_NUMBER_TEXT = 200
 _MULTIPLIERS = {"k": 1_000, "m": 1_000_000}
 
 
@@ -101,12 +104,25 @@ def _int_or_none(value: Any) -> Any:
     if isinstance(value, float):
         return int(value) if math.isfinite(value) and value >= 0 else None
     if isinstance(value, str):
-        match = _NUMBER.search(value)
-        if not match or match.group(1):
+        if len(value) > _MAX_NUMBER_TEXT:
             return None
-        number = float(match.group(2).replace(",", ""))
-        suffix = match.group(3)
-        return int(number * _MULTIPLIERS[suffix.lower()]) if suffix else int(number)
+        # Prefer a currency-tagged amount: "2nd place: $500" is 500, not 2.
+        match = _CURRENCY_NUMBER.search(value)
+        if match:
+            digits, suffix = match.group(1), match.group(2)
+        else:
+            match = _NUMBER.search(value)
+            if not match or match.group(1):
+                return None
+            digits, suffix = match.group(2), match.group(3)
+        number = float(digits.replace(",", ""))
+        if not math.isfinite(number):
+            return None
+        if suffix:
+            number *= _MULTIPLIERS[suffix.lower()]
+            if not math.isfinite(number):
+                return None
+        return int(number)
     return value
 
 
@@ -155,7 +171,9 @@ class HackathonEvent(BaseModel):
 
     @field_validator("canonical_url", mode="before")
     @classmethod
-    def _canonical(cls, value: str) -> str:
+    def _canonical(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"canonical_url must be a string, got {type(value).__name__}")
         return canonicalize(value)
 
     def closing_date(self) -> date | None:

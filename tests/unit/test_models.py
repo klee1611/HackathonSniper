@@ -73,6 +73,13 @@ def test_lenient_types_accept_llm_variants() -> None:
         ("unknown", None),
         (10000.0, 10000),
         (2500, 2500),
+        ("9" * 400, None),
+        ("9" * 400 + "k", None),
+        ("1e400", 1),
+        ("2nd place: $500", 500),
+        ("Top 3 win $5,000", 5000),
+        ("Top 3 win USD 2,500", 2500),
+        ("Top 3 win US$1.5k", 1500),
     ],
 )
 def test_lenient_int_takes_first_number(raw: object, expected: int | None) -> None:
@@ -132,3 +139,8 @@ def test_event_rejects_url_without_host() -> None:
         HackathonEvent(canonical_url="", name="x")
     with pytest.raises(ValidationError):
         HackathonEvent(canonical_url="/path", name="x")
+
+
+def test_event_rejects_non_string_url() -> None:
+    with pytest.raises(ValidationError):
+        HackathonEvent.model_validate({"canonical_url": None, "name": "x"})
