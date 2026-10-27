@@ -50,9 +50,12 @@ def _date(value: Any, zone: tzinfo, *, closing: bool = False) -> date | None:
         return None
     if moment is None or moment.tzinfo is None:
         return None
-    local = moment.astimezone(zone)
-    if closing and local.time() == time(0):
-        return local.date() - timedelta(days=1)
+    try:
+        local = moment.astimezone(zone)
+        if closing and local.time() == time(0):
+            return local.date() - timedelta(days=1)
+    except OverflowError:  # timestamps at the edges of date.min / date.max
+        return None
     return local.date()
 
 
@@ -115,7 +118,7 @@ def parse_devfolio(payload: dict[str, Any]) -> list[HackathonEvent]:
         src = hit.get("_source") if isinstance(hit, dict) else None
         try:
             event = _parse_source(src)
-        except ValidationError as e:
+        except (ValidationError, ValueError, OverflowError, TypeError) as e:
             # One malformed listing must not sink the whole source.
             slug = src.get("slug") if isinstance(src, dict) else None
             logger.info("skipping Devfolio item with slug %r: %s", slug, e)

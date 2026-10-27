@@ -1,7 +1,8 @@
 import json
 import logging
-from datetime import date
+from datetime import UTC, date
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -9,7 +10,7 @@ import respx
 
 from hackathon_sniper.http import make_client
 from hackathon_sniper.models import Format, Origin, Solo
-from hackathon_sniper.sources.devfolio import API, DevfolioSource, parse_devfolio
+from hackathon_sniper.sources.devfolio import API, DevfolioSource, _date, parse_devfolio
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "sources" / "devfolio.json"
 
@@ -168,6 +169,25 @@ def test_local_midnight_close_means_previous_day() -> None:
 def test_naive_or_unparseable_timestamp_is_none(stamp: object) -> None:
     (ev,) = parse_devfolio({"hits": {"hits": [hit(timezone="Asia/Kolkata", starts_at=stamp)]}})
     assert ev.start_date is None
+
+
+@pytest.mark.parametrize(
+    ("stamp", "zone", "closing"),
+    [
+        ("0001-01-01T00:00:00+00:00", UTC, True),
+        ("0001-01-01T00:30:00+05:30", UTC, False),
+        ("9999-12-31T23:00:00-05:00", ZoneInfo("Asia/Kolkata"), True),
+    ],
+)
+def test_extreme_timestamps_are_none(stamp: str, zone: ZoneInfo, closing: bool) -> None:
+    assert _date(stamp, zone, closing=closing) is None
+
+
+def test_overflowing_item_does_not_sink_source() -> None:
+    bad = hit(slug="bad", timezone="Asia/Kolkata", ends_at="9999-12-31T23:00:00-05:00")
+    payload = {"hits": {"hits": [bad, hit(slug="good")]}}
+    events = parse_devfolio(payload)
+    assert "https://good.devfolio.co" in [e.canonical_url for e in events]
 
 
 def test_parses_recorded_fixture() -> None:
