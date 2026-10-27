@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     brave_api_key: str | None = None
     serpapi_api_key: str | None = None
 
-    mlh_season: str = "2027"
+    mlh_season: str | None = None
     max_queries: int = Field(default=10, ge=1)
     results_per_query: int = Field(default=10, ge=1)
     max_verify: int = Field(default=25, ge=0)

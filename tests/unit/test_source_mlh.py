@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ import respx
 
 from hackathon_sniper.http import make_client
 from hackathon_sniper.models import Format, Origin
-from hackathon_sniper.sources.mlh import MLHSource, parse_mlh
+from hackathon_sniper.sources.mlh import MLHSource, current_season, parse_mlh
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "sources" / "mlh.html"
 
@@ -105,10 +106,18 @@ def test_messy_optional_fields() -> None:
     assert ev.themes == []
 
 
-@pytest.mark.parametrize("website", ["https://", "", 42, None])
+@pytest.mark.parametrize(
+    "website",
+    ["https://", "", 42, None, "TBA", "javascript:alert(1)", "ftp://x.example", "http://localhost"],
+)
 def test_unusable_website_falls_back_to_mlh_page(website: object) -> None:
     (ev,) = parse_mlh(page(EVENT | {"websiteUrl": website}))
     assert ev.canonical_url == "https://mlh.com/events/hackcbs-9-o/prizes"
+
+
+def test_real_website_is_kept() -> None:
+    (ev,) = parse_mlh(page(EVENT | {"websiteUrl": "https://hackcbs.tech"}))
+    assert ev.canonical_url == "https://hackcbs.tech"
 
 
 def test_diversity_focus_is_kept_in_description() -> None:
@@ -130,6 +139,7 @@ def test_diversity_focus_is_kept_in_description() -> None:
         EVENT | {"websiteUrl": None, "url": "/\\evil.com"},
         EVENT | {"status": "ended"},
         EVENT | {"customFields": {"underserved_types": ["High School Students Only"]}},
+        EVENT | {"customFields": {"underserved_types": ["high school students only "]}},
     ],
 )
 def test_skips_bad_ended_and_high_school_only_items(bad: object) -> None:
@@ -151,6 +161,26 @@ def test_missing_event_list_is_loud(props: dict[str, Any]) -> None:
 def test_unparseable_json_is_loud() -> None:
     with pytest.raises(ValueError):
         parse_mlh('<script data-page="app" type="application/json">{nope</script>')
+
+
+def test_decoy_scripts_are_ignored() -> None:
+    decoy = (
+        '<script>var x = \'<script data-page="app">\'</script><script data-page="nav">{}</script>'
+    )
+    assert len(parse_mlh(decoy + page(EVENT))) == 1
+
+
+def test_escaped_closing_script_tag_in_json() -> None:
+    html = page(EVENT | {"name": "Hack </script> Night"}).replace(
+        "</script> Night", "<\\/script> Night"
+    )
+    (ev,) = parse_mlh(html)
+    assert ev.name == "Hack </script> Night"
+
+
+def test_pathological_html_fails_fast() -> None:
+    with pytest.raises(ValueError, match="data-page"):
+        parse_mlh("<script " * 50_000)
 
 
 def test_parses_recorded_fixture() -> None:
@@ -178,3 +208,57 @@ def test_source_raises_on_http_error() -> None:
     respx.get("https://www.mlh.com/seasons/2027/events").mock(return_value=httpx.Response(500))
     with pytest.raises(httpx.HTTPStatusError):
         MLHSource(make_client(), "2027")()
+
+
+SEASON_URL = "https://www.mlh.com/seasons/{}/events"
+
+
+def fixed(day: date) -> Callable[[], date]:
+    return lambda: day
+
+
+@pytest.mark.parametrize(
+    ("today", "season"),
+    [(date(2026, 10, 26), "2027"), (date(2027, 3, 1), "2027"), (date(2027, 8, 15), "2028")],
+)
+def test_current_season(today: date, season: str) -> None:
+    assert current_season(today) == season
+
+
+def test_derived_season_fetches_and_merges_next_season(respx_mock: respx.MockRouter) -> None:
+    other = EVENT | {"websiteUrl": "https://next.example"}
+    current = respx_mock.get(SEASON_URL.format(2027)).mock(
+        return_value=httpx.Response(200, html=page(EVENT))
+    )
+    upcoming = respx_mock.get(SEASON_URL.format(2028)).mock(
+        return_value=httpx.Response(200, html=page(EVENT, other))
+    )
+    events = MLHSource(make_client(), today=fixed(date(2026, 10, 26)))()
+    assert [e.canonical_url for e in events] == ["https://hackcbs.tech", "https://next.example"]
+    assert current.called and upcoming.called
+
+
+@pytest.mark.parametrize("status", [404, 500])
+def test_next_season_failure_keeps_current_season(
+    respx_mock: respx.MockRouter, status: int
+) -> None:
+    respx_mock.get(SEASON_URL.format(2027)).mock(return_value=httpx.Response(200, html=page(EVENT)))
+    respx_mock.get(SEASON_URL.format(2028)).mock(return_value=httpx.Response(status))
+    events = MLHSource(make_client(), today=fixed(date(2026, 10, 26)))()
+    assert [e.canonical_url for e in events] == ["https://hackcbs.tech"]
+
+
+def test_current_season_failure_is_loud(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get(SEASON_URL.format(2027)).mock(return_value=httpx.Response(500))
+    respx_mock.get(SEASON_URL.format(2028)).mock(return_value=httpx.Response(200, html=page(EVENT)))
+    with pytest.raises(httpx.HTTPStatusError):
+        MLHSource(make_client(), today=fixed(date(2026, 10, 26)))()
+
+
+def test_explicit_season_fetches_only_that_season(respx_mock: respx.MockRouter) -> None:
+    route = respx_mock.get(SEASON_URL.format(2026)).mock(
+        return_value=httpx.Response(200, html=page(EVENT))
+    )
+    assert len(MLHSource(make_client(), "2026", today=fixed(date(2026, 10, 26)))()) == 1
+    assert route.call_count == 1
+    assert len(respx_mock.calls) == 1
