@@ -1,5 +1,7 @@
 from typing import Any
 
+import groq
+import httpx
 import pytest
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel
@@ -74,3 +76,42 @@ def test_respects_budget() -> None:
     llm, _ = make([Answer(value=1)], limit=0)
     with pytest.raises(BudgetExceeded):
         llm.structured(Answer, "sys", "user")
+
+
+def bad_request(code: str) -> groq.BadRequestError:
+    body = {"error": {"message": "failed", "type": "invalid_request_error", "code": code}}
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    response = httpx.Response(400, request=request, json=body)
+    return groq.BadRequestError(f"Error code: 400 - {body}", response=response, body=body)
+
+
+def test_repairs_missing_tool_call() -> None:
+    llm, _ = make([None, Answer(value=3)])
+    assert llm.structured(Answer, "sys", "user").value == 3
+    assert llm.budget.used == 2
+
+
+def test_gives_up_when_tool_call_stays_missing() -> None:
+    llm, _ = make([None, None])
+    with pytest.raises(LLMError, match="invalid structured output"):
+        llm.structured(Answer, "sys", "user")
+
+
+def test_rejects_non_schema_output() -> None:
+    llm, _ = make([{"value": 1}, Answer(value=4)])
+    assert llm.structured(Answer, "sys", "user").value == 4
+    assert llm.budget.used == 2
+
+
+def test_repairs_groq_tool_use_failed() -> None:
+    llm, chat = make([bad_request("tool_use_failed"), Answer(value=5)])
+    assert llm.structured(Answer, "sys", "user").value == 5
+    assert llm.budget.used == 2
+    assert "previous answer was invalid" in chat.prompts[1][1][1]
+
+
+def test_other_bad_request_is_not_repaired() -> None:
+    llm, _ = make([bad_request("model_not_found"), Answer(value=6)])
+    with pytest.raises(LLMError, match="model_not_found"):
+        llm.structured(Answer, "sys", "user")
+    assert llm.budget.used == 1
