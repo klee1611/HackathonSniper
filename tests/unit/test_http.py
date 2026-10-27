@@ -1,5 +1,7 @@
+import gzip
 import socket
 from collections.abc import Iterator
+from typing import Any
 
 import httpx
 import pytest
@@ -9,6 +11,7 @@ import hackathon_sniper.http as http_module
 from hackathon_sniper.http import (
     BlockedURLError,
     PageFetcher,
+    _guard_peer,
     _guard_request,
     make_client,
     related_links,
@@ -260,3 +263,179 @@ def test_related_links_ignore_keywords_in_host() -> None:
 def test_related_links_match_query() -> None:
     html = '<a href="/event?tab=prizes">More</a>'
     assert related_links(html, "https://ex.com/event") == ["https://ex.com/event?tab=prizes"]
+
+
+# --- malformed URLs never escape fetch() ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url", ["https://xn--.com/", "http://0177.0.0.1/x", "http://ex.com/\x01x", "http://ex\x01.com/"]
+)
+@respx.mock(assert_all_called=False)
+def test_malformed_urls_return_none(url: str, respx_mock: respx.MockRouter) -> None:
+    # http://ex.com/robots.txt is itself valid, so it may be fetched; the page never is.
+    respx_mock.get("http://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    other = respx_mock.route()
+    assert PageFetcher(make_client()).fetch(url) is None
+    assert not other.called
+
+
+# --- global-IP allowlist -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://100.64.0.1/",  # carrier-grade NAT
+        "http://168.63.129.16/",  # Azure WireServer
+        "http://[2002:a9fe:a9fe::]/",  # 6to4 wrapping 169.254.169.254
+        "http://[64:ff9b::a9fe:a9fe]/",  # NAT64 wrapping 169.254.169.254
+        "http://[2001:0:4136:e378:8000:63bf:5601:5601]/",  # Teredo client 169.254.169.254
+        "http://224.0.1.1/",  # multicast
+    ],
+)
+def test_guard_blocks_non_global_and_embedded_addresses(url: str) -> None:
+    with pytest.raises(BlockedURLError):
+        _guard_request(httpx.Request("GET", url))
+
+
+def test_guard_allows_global_ip() -> None:
+    _guard_request(httpx.Request("GET", "http://93.184.216.34/"))
+
+
+# --- post-connect peer check ------------------------------------------------------
+
+
+class _FakeNetworkStream:
+    def __init__(self, addr: Any) -> None:
+        self.addr = addr
+
+    def get_extra_info(self, name: str) -> Any:
+        return self.addr if name == "server_addr" else None
+
+
+def _response(extensions: dict[str, Any]) -> httpx.Response:
+    return httpx.Response(
+        200, request=httpx.Request("GET", "https://ex.com/"), extensions=extensions
+    )
+
+
+def test_peer_check_blocks_loopback_peer() -> None:
+    with pytest.raises(BlockedURLError):
+        _guard_peer(_response({"network_stream": _FakeNetworkStream(("127.0.0.1", 80))}))
+
+
+def test_peer_check_allows_public_peer() -> None:
+    _guard_peer(_response({"network_stream": _FakeNetworkStream(("93.184.216.34", 443))}))
+
+
+def test_peer_check_skips_when_unknown() -> None:
+    _guard_peer(_response({}))
+    _guard_peer(_response({"network_stream": _FakeNetworkStream(None)}))
+
+
+def test_client_installs_peer_hook() -> None:
+    assert _guard_peer in make_client().event_hooks["response"]
+
+
+# --- bounded decompression ---------------------------------------------------------
+
+
+@respx.mock
+def test_gzip_bomb_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    bomb = gzip.compress(b"<html><body>" + b"a" * 50_000_000, compresslevel=9)
+    parsed: list[int] = []
+    real_soup = http_module.BeautifulSoup
+
+    def spy(markup: Any, *args: Any, **kwargs: Any) -> Any:
+        parsed.append(len(markup))
+        return real_soup(markup, *args, **kwargs)
+
+    monkeypatch.setattr(http_module, "BeautifulSoup", spy)
+    respx.get("https://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    route = respx.get("https://ex.com/hack").mock(
+        return_value=httpx.Response(
+            200, headers={"Content-Type": "text/html", "Content-Encoding": "gzip"}, content=bomb
+        )
+    )
+    page = PageFetcher(make_client(), max_bytes=100_000).fetch("https://ex.com/hack")
+    assert page is not None and page.text.startswith("aaaa")
+    assert parsed and max(parsed) <= 100_000
+    assert route.calls.last.request.headers["accept-encoding"] == "identity"
+
+
+@respx.mock
+def test_small_gzip_page_decodes() -> None:
+    respx.get("https://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://ex.com/hack").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Content-Type": "text/html; charset=utf-8", "Content-Encoding": "gzip"},
+            content=gzip.compress(HTML.encode()),
+        )
+    )
+    page = PageFetcher(make_client()).fetch("https://ex.com/hack")
+    assert page is not None and "Big Hack Deadline: Nov 1" in page.text
+
+
+@respx.mock
+def test_unsupported_content_encoding_returns_none() -> None:
+    respx.get("https://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://ex.com/hack").mock(
+        return_value=httpx.Response(
+            200, headers={"Content-Type": "text/html", "Content-Encoding": "br"}, content=b"xx"
+        )
+    )
+    assert PageFetcher(make_client()).fetch("https://ex.com/hack") is None
+
+
+@respx.mock(assert_all_called=False)
+def test_robots_with_unsupported_encoding_means_disallow(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get("https://ex.com/robots.txt").mock(
+        return_value=httpx.Response(200, headers={"Content-Encoding": "br"}, content=b"xx")
+    )
+    route = respx_mock.get("https://ex.com/hack")
+    assert PageFetcher(make_client()).fetch("https://ex.com/hack") is None
+    assert not route.called
+
+
+@respx.mock
+def test_gzipped_robots_is_parsed() -> None:
+    robots = gzip.compress(b"User-agent: *\nDisallow: /private\n")
+    respx.get("https://ex.com/robots.txt").mock(
+        return_value=httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=robots)
+    )
+    fetcher = PageFetcher(make_client())
+    assert fetcher.allowed("https://ex.com/hack")
+    assert not fetcher.allowed("https://ex.com/private/x")
+
+
+# --- multibyte cut at the cap ----------------------------------------------------------
+
+
+@respx.mock
+def test_utf8_char_cut_at_cap_is_not_mojibake() -> None:
+    head = '<html><head><meta charset="utf-8"></head><body><p>Café '.encode()
+    body = head + "é".encode() * 100
+    respx.get("https://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://ex.com/hack").mock(
+        return_value=httpx.Response(
+            200, headers={"Content-Type": "text/html"}, content=iter([body])
+        )
+    )
+    # Streamed (no Content-Length), so the body is read and cut by the cap,
+    # which lands on the first byte of the 3rd "é".
+    page = PageFetcher(make_client(), max_bytes=len(head) + 5).fetch("https://ex.com/hack")
+    assert page is not None
+    assert page.text == "Café éé"
+
+
+# --- logging ----------------------------------------------------------------------------
+
+
+def test_guard_block_logs_reason_not_robots(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("INFO", logger="hackathon_sniper.http")
+    with respx.mock(assert_all_called=False):
+        assert PageFetcher(make_client()).fetch("http://127.0.0.1/x") is None
+    assert "robots.txt disallows" not in caplog.text
+    assert "blocked" in caplog.text
