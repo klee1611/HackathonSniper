@@ -49,7 +49,7 @@ __pycache__/
 .ruff_cache/
 
 # Local notes (never commit)
-docs/
+/docs/
 
 # Third-party pages used for local evals
 evals/cases/*.html
