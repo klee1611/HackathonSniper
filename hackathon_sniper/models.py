@@ -1,10 +1,13 @@
+import math
 import re
-from datetime import date
+from collections.abc import Mapping
+from datetime import date, datetime
 from enum import Enum, IntEnum, StrEnum
 from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
 
+from hackathon_sniper.dates import parse_date
 from hackathon_sniper.urls import canonicalize
 
 
@@ -46,12 +49,22 @@ class Origin(IntEnum):
     PAGE = 3
 
 
+_NUMBER = re.compile(r"(-?)(\d[\d,]*(?:\.\d+)?)\s*([kKmM](?![A-Za-z]))?")
+_MULTIPLIERS = {"k": 1_000, "m": 1_000_000}
+
+
 def _letters(text: str) -> str:
     return re.sub(r"[^a-z]", "", text.lower())
 
 
-def _lenient_enum[E: Enum](enum_cls: type[E], unknown: E) -> BeforeValidator:
-    """LLMs say 'in person' or 'ONLINE'; map loosely instead of failing validation."""
+def _lenient_enum[E: Enum](
+    enum_cls: type[E], unknown: E, aliases: Mapping[str, E] | None = None
+) -> BeforeValidator:
+    """LLMs say 'in person' or 'ONLINE'; map loosely instead of failing validation.
+
+    Alias keys are compared after normalizing to lowercase letters, so 'True' and
+    True both hit the "true" alias.
+    """
 
     def parse(value: Any) -> Any:
         if isinstance(value, enum_cls):
@@ -62,31 +75,58 @@ def _lenient_enum[E: Enum](enum_cls: type[E], unknown: E) -> BeforeValidator:
         for member in enum_cls:
             if key in (_letters(str(member.value)), _letters(member.name)):
                 return member
-        return unknown
+        return (aliases or {}).get(key, unknown)
 
     return BeforeValidator(parse)
 
 
-def _iso_date_or_none(value: Any) -> Any:
+def _iso_date_or_none(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     if isinstance(value, str):
         try:
             return date.fromisoformat(value.strip()[:10])
         except ValueError:
-            return None
-    return value
+            return parse_date(value)
+    return None
 
 
 def _int_or_none(value: Any) -> Any:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
     if isinstance(value, float):
-        return int(value)
+        return int(value) if math.isfinite(value) and value >= 0 else None
     if isinstance(value, str):
-        digits = re.sub(r"[^\d]", "", value)
-        return int(digits) if digits else None
+        match = _NUMBER.search(value)
+        if not match or match.group(1):
+            return None
+        number = float(match.group(2).replace(",", ""))
+        suffix = match.group(3)
+        return int(number * _MULTIPLIERS[suffix.lower()]) if suffix else int(number)
     return value
 
 
-LenientFormat = Annotated[Format, _lenient_enum(Format, Format.UNKNOWN)]
-LenientSolo = Annotated[Solo, _lenient_enum(Solo, Solo.UNKNOWN)]
+_FORMAT_ALIASES = {
+    "virtual": Format.ONLINE,
+    "remote": Format.ONLINE,
+    "onsite": Format.IN_PERSON,
+    "offline": Format.IN_PERSON,
+    "inperson": Format.IN_PERSON,
+}
+_SOLO_ALIASES = {
+    "true": Solo.YES,
+    "y": Solo.YES,
+    "allowed": Solo.YES,
+    "false": Solo.NO,
+    "n": Solo.NO,
+}
+
+LenientFormat = Annotated[Format, _lenient_enum(Format, Format.UNKNOWN, _FORMAT_ALIASES)]
+LenientSolo = Annotated[Solo, _lenient_enum(Solo, Solo.UNKNOWN, _SOLO_ALIASES)]
 LenientDate = Annotated[date | None, BeforeValidator(_iso_date_or_none)]
 LenientInt = Annotated[int | None, BeforeValidator(_int_or_none)]
 

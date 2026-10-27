@@ -1,3 +1,5 @@
+import pytest
+
 from hackathon_sniper.urls import canonicalize
 
 
@@ -20,3 +22,14 @@ def test_adds_scheme_when_missing() -> None:
 def test_is_idempotent() -> None:
     once = canonicalize("https://x.devpost.com/?ref=home")
     assert canonicalize(once) == once
+
+
+def test_protocol_relative_url_gets_https() -> None:
+    assert canonicalize("//x.com/a") == "https://x.com/a"
+
+
+def test_empty_host_raises() -> None:
+    with pytest.raises(ValueError, match="no host"):
+        canonicalize("")
+    with pytest.raises(ValueError, match="no host"):
+        canonicalize("/path")
