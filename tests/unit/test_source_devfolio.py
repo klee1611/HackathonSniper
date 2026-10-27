@@ -93,6 +93,7 @@ def test_null_registration_deadline() -> None:
         hit(slug="evil.com/x"),
         hit(slug="-bad-"),
         hit(slug=42),
+        hit(type="WORKSHOP"),
     ],
 )
 def test_skips_bad_and_private_items(bad: object) -> None:
@@ -105,11 +106,81 @@ def test_malformed_payload_is_empty(payload: object) -> None:
     assert parse_devfolio(payload) == []  # type: ignore[arg-type]
 
 
+def test_dates_use_event_timezone() -> None:
+    (ev,) = parse_devfolio(
+        {
+            "hits": {
+                "hits": [
+                    hit(
+                        timezone="Asia/Kolkata",
+                        starts_at="2026-10-30T18:30:00+00:00",
+                        ends_at="2026-11-01T12:00:00+00:00",
+                    )
+                ]
+            }
+        }
+    )
+    assert (ev.start_date, ev.end_date) == (date(2026, 10, 31), date(2026, 11, 1))
+    (ev,) = parse_devfolio(
+        {
+            "hits": {
+                "hits": [
+                    hit(
+                        timezone="America/Los_Angeles",
+                        hackathon_setting={"reg_ends_at": "2026-11-02T07:59:00+00:00"},
+                    )
+                ]
+            }
+        }
+    )
+    assert ev.registration_deadline == date(2026, 11, 1)
+
+
+@pytest.mark.parametrize("tz", [None, "Not/AZone", "", 5, "../etc/passwd", "America"])
+def test_missing_or_bogus_timezone_falls_back_to_utc(tz: object) -> None:
+    (ev,) = parse_devfolio(
+        {"hits": {"hits": [hit(timezone=tz, starts_at="2026-10-30T18:30:00+00:00")]}}
+    )
+    assert ev.start_date == date(2026, 10, 30)
+
+
+def test_local_midnight_close_means_previous_day() -> None:
+    (ev,) = parse_devfolio(
+        {
+            "hits": {
+                "hits": [
+                    hit(
+                        timezone="Asia/Calcutta",
+                        starts_at="2026-10-31T18:30:00+00:00",  # midnight start stays put
+                        ends_at="2026-11-02T18:30:00+00:00",
+                        hackathon_setting={"reg_ends_at": "2026-10-28T18:30:00+00:00"},
+                    )
+                ]
+            }
+        }
+    )
+    assert ev.start_date == date(2026, 11, 1)
+    assert ev.end_date == date(2026, 11, 2)
+    assert ev.registration_deadline == date(2026, 10, 28)
+
+
+@pytest.mark.parametrize("stamp", ["2026-10-30T18:30:00", "next week", "", 12])
+def test_naive_or_unparseable_timestamp_is_none(stamp: object) -> None:
+    (ev,) = parse_devfolio({"hits": {"hits": [hit(timezone="Asia/Kolkata", starts_at=stamp)]}})
+    assert ev.start_date is None
+
+
 def test_parses_recorded_fixture() -> None:
     events = parse_devfolio(json.loads(FIXTURE.read_text()))
     assert len(events) == 3
     assert all(e.canonical_url.endswith(".devfolio.co") for e in events)
     assert all(e.start_date and e.end_date and e.registration_deadline for e in events)
+    surat = next(e for e in events if "surat" in e.canonical_url)
+    assert (surat.registration_deadline, surat.start_date, surat.end_date) == (
+        date(2026, 10, 28),
+        date(2026, 11, 1),
+        date(2026, 11, 1),
+    )
 
 
 @respx.mock

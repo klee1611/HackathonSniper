@@ -1,12 +1,12 @@
 import logging
 import re
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from pydantic import ValidationError
 
-from hackathon_sniper.dates import parse_date
 from hackathon_sniper.models import Format, HackathonEvent, Origin, Solo
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,28 @@ def _text(value: Any) -> str | None:
     return text or None
 
 
-def _date(value: Any) -> date | None:
-    return parse_date(value) if isinstance(value, str) else None
+def _zone(name: Any) -> tzinfo:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError, OSError):
+        return UTC
+
+
+def _date(value: Any, zone: tzinfo, *, closing: bool = False) -> date | None:
+    """Local calendar date of an aware ISO timestamp; None if naive or unparseable.
+
+    A close at exactly local midnight means the end of the previous day.
+    """
+    try:
+        moment = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+    if moment is None or moment.tzinfo is None:
+        return None
+    local = moment.astimezone(zone)
+    if closing and local.time() == time(0):
+        return local.date() - timedelta(days=1)
+    return local.date()
 
 
 def _hits(payload: Any) -> list[Any]:
@@ -52,9 +72,13 @@ def _total(payload: Any) -> int | None:
 def _parse_source(src: Any) -> HackathonEvent | None:
     if not isinstance(src, dict) or src.get("private"):
         return None
+    if src.get("type") not in (None, "HACKATHON"):
+        return None
     slug, name = src.get("slug"), _text(src.get("name"))
     if not isinstance(slug, str) or not _SLUG.fullmatch(slug) or not name:
         return None
+    # Devfolio exposes only is_online, so hybrid events land as ONLINE or IN_PERSON
+    # here and the Verifier refines them from the event page.
     online = src.get("is_online")
     fmt = (
         Format.ONLINE if online is True else Format.IN_PERSON if online is False else Format.UNKNOWN
@@ -62,16 +86,17 @@ def _parse_source(src: Any) -> HackathonEvent | None:
     places = (_text(src.get("city")), _text(src.get("country")))
     location = ", ".join(p for p in places if p) or None
     setting = src.get("hackathon_setting")
+    zone = _zone(src.get("timezone"))
     themes = src.get("themes")
     return HackathonEvent(
         canonical_url=f"https://{slug}.devfolio.co/",
         name=name,
         sources=["devfolio"],
-        registration_deadline=_date(setting.get("reg_ends_at"))
+        registration_deadline=_date(setting.get("reg_ends_at"), zone, closing=True)
         if isinstance(setting, dict)
         else None,
-        start_date=_date(src.get("starts_at")),
-        end_date=_date(src.get("ends_at")),
+        start_date=_date(src.get("starts_at"), zone),
+        end_date=_date(src.get("ends_at"), zone, closing=True),
         format=fmt,
         location=None if fmt is Format.ONLINE else location,
         solo_allowed=_solo(src.get("team_min")),
