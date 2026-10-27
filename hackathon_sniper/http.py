@@ -44,7 +44,7 @@ def _resolve(host: str) -> list[str]:
 def _embedded_ips(
     ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    """`ip` plus any IPv4 address tunnelled inside it (mapped, 6to4, Teredo, NAT64)."""
+    """`ip` plus any IPv4 address tunnelled inside it (mapped, compat, 6to4, Teredo, NAT64)."""
     found: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [ip]
     if isinstance(ip, ipaddress.IPv6Address):
         if ip.ipv4_mapped is not None:
@@ -53,6 +53,8 @@ def _embedded_ips(
             found.append(ip.sixtofour)
         if ip.teredo is not None:
             found.extend(ip.teredo)
+        if int(ip) >> 32 == 0 and int(ip) > 1:  # IPv4-compatible ::a.b.c.d (not :: or ::1)
+            found.append(ipaddress.IPv4Address(int(ip)))
         if ip in _NAT64:
             found.append(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
     return found
@@ -65,7 +67,15 @@ def _is_unsafe_ip(address: str) -> bool:
     except ValueError:
         return True
     for candidate in _embedded_ips(ip):
-        if not candidate.is_global or candidate.is_multicast or candidate in _EXTRA_BLOCKED:
+        if (
+            not candidate.is_global
+            or candidate.is_multicast
+            or candidate.is_reserved
+            or candidate.is_loopback
+            or candidate.is_link_local
+            or candidate.is_private
+            or candidate in _EXTRA_BLOCKED
+        ):
             return True
     return False
 
@@ -113,6 +123,7 @@ def make_client() -> httpx.Client:
         headers={"User-Agent": USER_AGENT},
         follow_redirects=True,
         max_redirects=5,
+        trust_env=False,  # env proxies would bypass the guard and trip the peer check
         event_hooks={"request": [_guard_request], "response": [_guard_peer]},
     )
 
@@ -201,12 +212,17 @@ def _declared_length(response: httpx.Response) -> int | None:
 
 
 def _known_encoding(name: str | None) -> str | None:
+    """Normalised name of a *text* codec, or None (unknown, or bytes-to-bytes like base64)."""
     if not name:
         return None
     try:
-        return codecs.lookup(name).name
+        info = codecs.lookup(name)
+        if not getattr(info, "_is_text_encoding", True):
+            return None
+        b"".decode(info.name)  # raises LookupError for non-text codecs
     except LookupError:
         return None
+    return info.name
 
 
 def _trim_partial_utf8(body: bytes) -> bytes:
@@ -313,6 +329,11 @@ class PageFetcher:
         except (*_FETCH_ERRORS, _UnsupportedEncodingError, zlib.error) as e:
             logger.info("fetch failed for %s: %r", url, e)
             return None
-        soup = _parse(body, header_charset)
-        links = _soup_related_links(soup, final_url)
-        return Page(url=final_url, text=_soup_text(soup)[: self.max_chars], links=links)
+        try:
+            soup = _parse(body, header_charset)
+            links = _soup_related_links(soup, final_url)
+            text = _soup_text(soup)[: self.max_chars]
+        except (LookupError, ValueError) as e:
+            logger.info("could not parse %s: %r", url, e)
+            return None
+        return Page(url=final_url, text=text, links=links)

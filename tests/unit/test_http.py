@@ -1,4 +1,5 @@
 import gzip
+import ipaddress
 import socket
 from collections.abc import Iterator
 from typing import Any
@@ -439,3 +440,63 @@ def test_guard_block_logs_reason_not_robots(caplog: pytest.LogCaptureFixture) ->
         assert PageFetcher(make_client()).fetch("http://127.0.0.1/x") is None
     assert "robots.txt disallows" not in caplog.text
     assert "blocked" in caplog.text
+
+
+# --- non-text charsets ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("charset", ["base64", "rot13", "zip"])
+@respx.mock
+def test_non_text_header_charset_falls_back(charset: str) -> None:
+    respx.get("https://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://ex.com/hack").mock(
+        return_value=httpx.Response(
+            200, headers={"Content-Type": f"text/html; charset={charset}"}, content=HTML.encode()
+        )
+    )
+    page = PageFetcher(make_client()).fetch("https://ex.com/hack")
+    assert page is not None and "Big Hack Deadline: Nov 1" in page.text
+
+
+@respx.mock
+def test_non_text_meta_charset_falls_back() -> None:
+    body = b'<html><head><meta charset="base64"></head><body><p>Big Hack</p></body></html>'
+    respx.get("https://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://ex.com/hack").mock(
+        return_value=httpx.Response(200, headers={"Content-Type": "text/html"}, content=body)
+    )
+    page = PageFetcher(make_client()).fetch("https://ex.com/hack")
+    assert page is not None and "Big Hack" in page.text
+
+
+@respx.mock
+def test_parse_errors_return_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(body: bytes, header_charset: str | None) -> Any:
+        raise LookupError("unknown encoding")
+
+    monkeypatch.setattr(http_module, "_parse", broken)
+    respx.get("https://ex.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://ex.com/hack").mock(return_value=httpx.Response(200, html=HTML))
+    assert PageFetcher(make_client()).fetch("https://ex.com/hack") is None
+
+
+# --- IPv4-compatible IPv6 -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("url", ["http://[::7f00:1]/", "http://[::a9fe:a9fe]/"])
+def test_guard_blocks_ipv4_compatible_addresses(url: str) -> None:
+    with pytest.raises(BlockedURLError):
+        _guard_request(httpx.Request("GET", url))
+
+
+def test_embedded_ips_unwraps_ipv4_compatible() -> None:
+    found = http_module._embedded_ips(ipaddress.ip_address("::a9fe:a9fe"))
+    assert ipaddress.IPv4Address("169.254.169.254") in found
+    assert len(http_module._embedded_ips(ipaddress.ip_address("::1"))) == 1
+
+
+# --- environment proxies ------------------------------------------------------------
+
+
+def test_client_ignores_environment_proxies() -> None:
+    assert make_client().trust_env is False
