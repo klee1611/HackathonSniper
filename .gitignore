@@ -39,3 +39,17 @@ Thumbs.db
 
 # Cache directories
 .cache/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local notes (never commit)
+docs/
+
+# Third-party pages used for local evals
+evals/cases/*.html
