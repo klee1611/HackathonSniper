@@ -295,6 +295,7 @@ version = "3.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "beautifulsoup4" },
+    { name = "groq" },
     { name = "httpx" },
     { name = "langchain-core" },
     { name = "langchain-groq" },
@@ -316,6 +317,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.15.0" },
+    { name = "groq", specifier = ">=0.37.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-core", specifier = ">=1.7.0" },
     { name = "langchain-groq", specifier = ">=1.1.3" },

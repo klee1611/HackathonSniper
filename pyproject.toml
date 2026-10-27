@@ -5,6 +5,7 @@ description = "Multi-agent hackathon discovery: LangGraph + Groq + Notion"
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
+    "groq>=0.37.1",
     "httpx>=0.28.1",
     "langchain-core>=1.7.0",
     "langchain-groq>=1.1.3",
