@@ -28,6 +28,9 @@ def _strip_tags(text: str) -> str:
 class _RedactApiKey(logging.Filter):
     """Mask `api_key=...` in httpx's request log line (SerpApi only takes the key as a param)."""
 
+    # Marker survives importlib.reload (a reload creates a new class, defeating isinstance).
+    _hackathon_sniper_redact = True
+
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
         if "api_key=" in message:
@@ -37,7 +40,7 @@ class _RedactApiKey(logging.Filter):
 
 
 _httpx_logger = logging.getLogger("httpx")
-if not any(isinstance(f, _RedactApiKey) for f in _httpx_logger.filters):
+if not any(getattr(f, "_hackathon_sniper_redact", False) for f in _httpx_logger.filters):
     _httpx_logger.addFilter(_RedactApiKey())
 
 
@@ -85,11 +88,15 @@ class SerpApiSearch:
         }
         safe = httpx.Request("GET", httpx.URL(self.URL, params=params | {"api_key": _REDACTED}))
         # The key travels in the query string, so httpx errors would echo it: re-raise scrubbed.
+        failure: tuple[type[httpx.RequestError], str] | None = None
         try:
             response = self.client.get(self.URL, params=params, follow_redirects=False)
         except httpx.RequestError as e:
-            message = str(e).replace(self.api_key, _REDACTED)
-            raise type(e)(message, request=safe) from None
+            failure = (type(e), str(e).replace(self.api_key, _REDACTED))
+        if failure is not None:
+            # Raised outside the except block so __context__ can't carry the unscrubbed error.
+            error_type, message = failure
+            raise error_type(message, request=safe)
         if not response.is_success:
             response.request = safe
             raise httpx.HTTPStatusError(

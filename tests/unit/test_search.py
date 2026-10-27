@@ -1,9 +1,12 @@
+import importlib
 import logging
+import traceback
 
 import httpx
 import pytest
 import respx
 
+from hackathon_sniper import search as search_module
 from hackathon_sniper.http import make_client
 from hackathon_sniper.search import BraveSearch, SearchResult, SerpApiSearch, make_search
 from tests.factories import make_settings
@@ -99,7 +102,10 @@ def test_serpapi_transport_error_does_not_leak_key() -> None:
         SerpApiSearch(SECRET, make_client()).search("q", 5)
     assert SECRET not in str(info.value)
     assert SECRET not in str(info.value.request.url)
-    assert info.value.__suppress_context__
+    assert info.value.__context__ is None
+    assert info.value.__cause__ is None
+    assert SECRET not in repr(info.value)
+    assert SECRET not in "".join(traceback.format_exception(info.value))
 
 
 @respx.mock
@@ -141,3 +147,24 @@ def test_serpapi_does_not_follow_redirects() -> None:
         SerpApiSearch(SECRET, make_client()).search("q", 5)
     assert SECRET not in str(info.value)
     assert not evil.called
+
+
+def _redact_filters() -> list[logging.Filter | object]:
+    return [
+        f
+        for f in logging.getLogger("httpx").filters
+        if getattr(f, "_hackathon_sniper_redact", False)
+    ]
+
+
+def test_redact_filter_survives_reload() -> None:
+    httpx_logger = logging.getLogger("httpx")
+    before = list(httpx_logger.filters)
+    try:
+        importlib.reload(search_module)
+        assert len(_redact_filters()) == 1
+    finally:
+        for f in list(httpx_logger.filters):
+            httpx_logger.removeFilter(f)
+        for f in before:
+            httpx_logger.addFilter(f)
