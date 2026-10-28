@@ -1,13 +1,21 @@
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
-from typing import TYPE_CHECKING, Any, Protocol
+from datetime import UTC, date, datetime
+from typing import Any, Protocol
+
+import httpx
 
 from hackathon_sniper.config import Settings
-from hackathon_sniper.http import Page
-from hackathon_sniper.llm.base import LLM
+from hackathon_sniper.http import Page, PageFetcher
+from hackathon_sniper.llm.base import LLM, LLMBudget
+from hackathon_sniper.llm.groq import GroqLLM
 from hackathon_sniper.models import HackathonEvent
-from hackathon_sniper.search import SearchProvider
+from hackathon_sniper.notion.client import NotionGateway
+from hackathon_sniper.search import SearchProvider, make_search
+from hackathon_sniper.sources.devfolio import DevfolioSource
+from hackathon_sniper.sources.devpost import DevpostSource
+from hackathon_sniper.sources.mlh import MLHSource
 
 Source = Callable[[], list[HackathonEvent]]
 
@@ -38,12 +46,34 @@ class Deps:
     summary_writer: Callable[[str], None] = print
 
 
-if TYPE_CHECKING:
-    from hackathon_sniper.http import PageFetcher
-    from hackathon_sniper.notion.client import NotionGateway
+def _summary_writer() -> Callable[[str], None]:
+    """Write to the GitHub Actions job summary when running in Actions, else stdout."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return print
 
-    def _real_adapters_satisfy_ports(
-        notion: NotionGateway, fetcher: PageFetcher
-    ) -> tuple[NotionPort, FetcherPort]:
-        """mypy-only: fails type-checking if the real classes drift from the ports."""
-        return notion, fetcher
+    def write(markdown: str) -> None:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(markdown + "\n")
+
+    return write
+
+
+def build_deps(settings: Settings, client: httpx.Client) -> Deps:
+    """Production wiring. Every HTTP adapter shares `client`; the caller owns (and closes) it."""
+    return Deps(
+        settings=settings,
+        llm=GroqLLM(
+            settings.groq_api_key, settings.groq_model, LLMBudget(settings.llm_call_budget)
+        ),
+        search=make_search(settings, client),
+        sources={
+            "devpost": DevpostSource(client),
+            "devfolio": DevfolioSource(client),
+            "mlh": MLHSource(client, settings.mlh_season),
+        },
+        notion=NotionGateway(settings.notion_token, client),
+        fetcher=PageFetcher(client),
+        today=datetime.now(UTC).date(),
+        summary_writer=_summary_writer(),
+    )
