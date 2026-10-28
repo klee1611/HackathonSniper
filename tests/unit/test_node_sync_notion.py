@@ -56,7 +56,7 @@ def test_archives_expired_rows_and_skips_expired_new_events() -> None:
     out = sync_notion(
         {"existing": {old.canonical_url: old}, "ranked": [old, gone]}, make_deps(notion=notion)
     )
-    assert out["sync_result"] == SyncResult(archived=1)
+    assert out["sync_result"] == SyncResult(archived=1, skipped=1)
     assert notion.get_page(pid)["properties"]["Lifecycle"] == {"select": {"name": "Expired"}}
     assert notion.writes == [("update", pid)]
 
@@ -210,7 +210,7 @@ def test_same_url_twice_in_ranked_creates_one_row() -> None:
     first = event(url="https://dup.dev", name="Dup", fit_score=10)
     second = event(url="https://dup.dev/", name="Dup again", fit_score=20)
     out = sync_notion({"existing": {}, "ranked": [first, second]}, make_deps(notion=notion))
-    assert out["sync_result"] == SyncResult(created=1)
+    assert out["sync_result"] == SyncResult(created=1, skipped=1)
     assert [kind for kind, _ in notion.writes] == ["create"]
 
 
@@ -250,3 +250,76 @@ def test_empty_state_is_a_no_op() -> None:
     notion = FakeNotion()
     out = sync_notion({}, make_deps(notion=notion))
     assert out == {"sync_result": SyncResult(), "errors": []} and notion.writes == []
+
+
+# ---- skipped counter ------------------------------------------------------------------------
+
+
+def test_every_ranked_entry_is_counted_exactly_once() -> None:
+    class Flaky(FakeNotion):
+        def create_page(self, database_id: str, properties: dict[str, Any]) -> str:
+            if properties["URL"]["url"] == "https://fail.dev":
+                raise RuntimeError("Notion 500")
+            return super().create_page(database_id, properties)
+
+    notion = Flaky()
+    _, kept = seed(notion, "https://kept.dev", registration_deadline=TODAY + timedelta(days=9))
+    _, changed = seed(notion, "https://changed.dev", registration_deadline=TODAY + timedelta(9))
+    _, closing = seed(notion, "https://closing.dev", registration_deadline=TODAY - timedelta(1))
+    soon = TODAY + timedelta(days=4)
+    ranked = [
+        kept,
+        changed.model_copy(update={"fit_score": 60}),
+        closing,
+        event(url="https://new.dev", registration_deadline=soon),
+        event(url="https://new.dev/", registration_deadline=soon),  # duplicate URL
+        event(url="https://closed.dev", registration_deadline=TODAY - timedelta(days=1)),
+        event(url="https://fail.dev", registration_deadline=soon),
+    ]
+    existing = {e.canonical_url: e for e in (kept, changed, closing)}
+    out = sync_notion({"existing": existing, "ranked": ranked}, make_deps(notion=notion))
+    r = out["sync_result"]
+    assert r == SyncResult(created=1, updated=1, archived=1, unchanged=1, failed=1, skipped=2)
+    total = r.created + r.updated + r.archived + r.unchanged + r.failed + r.skipped
+    assert total == len(ranked)
+
+
+# ---- manual dismissal -----------------------------------------------------------------------
+
+
+def test_manually_expired_row_with_same_deadline_stays_expired() -> None:
+    notion = FakeNotion()
+    deadline = TODAY + timedelta(days=20)
+    _, old = seed(notion, registration_deadline=deadline, lifecycle=Lifecycle.EXPIRED)
+    again = old.model_copy(update={"lifecycle": Lifecycle.ACTIVE})
+    out = sync_notion(
+        {"existing": {old.canonical_url: old}, "ranked": [again]}, make_deps(notion=notion)
+    )
+    assert out["sync_result"] == SyncResult(unchanged=1) and notion.writes == []
+
+
+def test_manually_expired_row_with_extended_deadline_reactivates() -> None:
+    notion = FakeNotion()
+    deadline = TODAY + timedelta(days=20)
+    pid, old = seed(notion, registration_deadline=deadline, lifecycle=Lifecycle.EXPIRED)
+    extended = old.model_copy(update={"registration_deadline": deadline + timedelta(days=5)})
+    out = sync_notion(
+        {"existing": {old.canonical_url: old}, "ranked": [extended]}, make_deps(notion=notion)
+    )
+    assert out["sync_result"] == SyncResult(updated=1)
+    assert notion.get_page(pid)["properties"]["Lifecycle"] == {"select": {"name": "Active"}}
+
+
+def test_expired_row_never_gets_a_last_seen_refresh() -> None:
+    notion = FakeNotion()
+    _, old = seed(
+        notion,
+        registration_deadline=TODAY - timedelta(days=30),
+        lifecycle=Lifecycle.EXPIRED,
+        last_seen=TODAY - timedelta(days=60),
+    )
+    seen = old.model_copy(update={"last_seen": TODAY})
+    out = sync_notion(
+        {"existing": {old.canonical_url: old}, "ranked": [seen]}, make_deps(notion=notion)
+    )
+    assert out["sync_result"] == SyncResult(unchanged=1) and notion.writes == []

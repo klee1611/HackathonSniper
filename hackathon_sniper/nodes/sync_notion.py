@@ -4,11 +4,14 @@ Rules:
 - Keyed by canonical URL. A URL already in `existing` always updates that row (its page id
   wins over whatever the event carries), so a row is never duplicated.
 - Lifecycle is recomputed from dates: Expired iff the closing date is before today, so an
-  extended deadline re-activates a row. Archiving is just Active -> Expired.
+  extended deadline re-activates a row. A row already Expired (possibly set by hand) stays
+  Expired unless its closing date moved later. Archiving is just Active -> Expired.
 - Already-closed events never get a new row.
 - Only agent-owned columns are sent; PATCH keeps the user's own columns.
 - Write budget: a row whose only change is Last Seen is skipped unless the stored Last Seen is
   missing or LAST_SEEN_REFRESH_DAYS old, so seen-but-unchanged rows aren't PATCHed daily.
+  Expired rows never get a Last Seen-only write.
+- Already-closed new events and duplicate ranked URLs are counted as `skipped`.
 - Dry run counts but never writes. One failed row is counted and reported, never fatal.
 
 No pacing here: NotionGateway retries 429s honouring Retry-After.
@@ -43,7 +46,19 @@ def _last_seen_stale(old: date | None, new: date | None) -> bool:
 def _needs_write(old: HackathonEvent, new: HackathonEvent, properties: dict[str, Any]) -> bool:
     if _without_last_seen(event_to_properties(old)) != _without_last_seen(properties):
         return True
-    return _last_seen_stale(old.last_seen, new.last_seen)
+    # An Expired row is out of the user's way; bumping its Last Seen is pure churn.
+    return new.lifecycle == Lifecycle.ACTIVE and _last_seen_stale(old.last_seen, new.last_seen)
+
+
+def _lifecycle(ev: HackathonEvent, old: HackathonEvent | None, today: date) -> Lifecycle:
+    if ev.is_expired(today):
+        return Lifecycle.EXPIRED
+    if old is not None and old.lifecycle == Lifecycle.EXPIRED:
+        # The user may have dismissed it by hand: only a later closing date reactivates it.
+        old_closing, new_closing = old.closing_date(), ev.closing_date()
+        if old_closing is None or new_closing is None or new_closing <= old_closing:
+            return Lifecycle.EXPIRED
+    return Lifecycle.ACTIVE
 
 
 def _error(url: str, exc: Exception) -> str:
@@ -63,6 +78,7 @@ def sync_notion(state: GraphState, deps: Deps) -> dict[str, Any]:
         url = ev.canonical_url
         if url in done:
             logger.warning("Skipping duplicate ranked event for %s", url)
+            result.skipped += 1
             continue
         done.add(url)
         old = existing.get(url)
@@ -74,13 +90,14 @@ def sync_notion(state: GraphState, deps: Deps) -> dict[str, Any]:
                 ev.notion_page_id,
                 page_id,
             )
-        lifecycle = Lifecycle.EXPIRED if ev.is_expired(deps.today) else Lifecycle.ACTIVE
+        lifecycle = _lifecycle(ev, old, deps.today)
         ev = ev.model_copy(update={"lifecycle": lifecycle, "notion_page_id": page_id})
         try:
             properties = event_to_properties(ev)
             if page_id is None:
                 if lifecycle == Lifecycle.EXPIRED:
-                    continue  # never create rows for events that already closed
+                    result.skipped += 1  # never create rows for events that already closed
+                    continue
                 if not s.dry_run:
                     deps.notion.create_page(s.notion_hackathons_db_id, properties)
                 result.created += 1

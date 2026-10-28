@@ -12,6 +12,7 @@ class SyncResult(BaseModel):
     archived: int = 0
     unchanged: int = 0
     failed: int = 0
+    skipped: int = 0
 
 
 class GraphState(TypedDict, total=False):
