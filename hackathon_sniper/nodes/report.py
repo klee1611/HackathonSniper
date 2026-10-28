@@ -2,8 +2,13 @@
 
 The job summary of a public repo is public, and nearly everything shown here (event names,
 URLs, fit reasons, error strings) comes from scraped pages or LLM output. Every interpolated
-value goes through `_md` / `_link_url` so it can't break the table, forge a link, or inject
-HTML.
+value goes through `_md` / `_link_url` so it can't break the table, forge a link, inject
+HTML, or ping people via @mentions / #references.
+
+Exit code: red only for real problems, never for one persistent bad row. Notion sync turns
+the run red when failures are >= MIN_SYNC_FAILURES and >= SYNC_FAILURE_PERCENT% of attempted
+writes (created + updated + archived + failed); failures below that are still listed in the
+summary. Sources turn it red when at least half of them (including web search) failed.
 """
 
 from collections import Counter
@@ -27,15 +32,19 @@ SYNC_FAILURE_PERCENT = 20
 # start emphasis, code, links, images or a table cell boundary.
 _MD_SPECIAL = "\\`*_{}[]()#+!|~"
 # Characters kept as-is in a link target; everything else (space, ( ) [ ] < > " ' | ` \ and
-# non-ASCII) is percent-encoded so it can't end the link or the table cell.
-_URL_SAFE = ":/?#@!$&*+,;=%~-._"
+# & and non-ASCII) is percent-encoded so it can't end the link, the table cell, or form an
+# HTML entity.
+_URL_SAFE = ":/?#@!$*+,;=%~-._"
+# Word joiner: invisible, but stops GitHub linking @user / #123.
+_WORD_JOINER = "\u2060"
 
 
 def _md(text: str, limit: int) -> str:
     """Untrusted text as inert inline Markdown: one line, capped, no HTML, no link syntax."""
     text = one_line(text, limit)
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return "".join("\\" + c if c in _MD_SPECIAL else c for c in text)
+    text = "".join("\\" + c if c in _MD_SPECIAL else c for c in text)
+    return text.replace("@", "@" + _WORD_JOINER).replace("#", "#" + _WORD_JOINER)
 
 
 def _link_url(url: str) -> str | None:
@@ -54,6 +63,8 @@ def _event_cell(name: str, url: str) -> str:
 
 
 def render_report(state: GraphState, deps: Deps) -> str:
+    """Bare http(s), www. and email text in reasons/errors may still be GFM-autolinked;
+    accepted, since such links can't execute script."""
     sync = state.get("sync_result") or SyncResult()
     by_source = Counter(src for ev in state.get("candidates", []) for src in ev.sources)
     ranked = state.get("ranked", [])
@@ -96,12 +107,8 @@ def report(state: GraphState, deps: Deps) -> dict[str, Any]:
 
 def _sync_failed(sync: SyncResult) -> bool:
     """Persistent per-row failures are listed but only turn the run red when they're many:
-    ≥ MIN_SYNC_FAILURES and ≥ SYNC_FAILURE_PERCENT% of attempted writes, or every write failed."""
+    ≥ MIN_SYNC_FAILURES and ≥ SYNC_FAILURE_PERCENT% of attempted writes."""
     attempted = sync.created + sync.updated + sync.archived + sync.failed
-    if sync.failed == 0:
-        return False
-    if sync.failed == attempted:
-        return True
     many = sync.failed >= MIN_SYNC_FAILURES
     return many and sync.failed * 100 >= SYNC_FAILURE_PERCENT * attempted
 

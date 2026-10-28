@@ -115,11 +115,28 @@ def test_report_caps_and_escapes_error_list() -> None:
     assert md.endswith("- … and 7 more")
 
 
+def test_report_neutralises_mentions_and_issue_references() -> None:
+    ev = event(name="@octocat #123", fit_score=95, fit_reason="ping @team see #4 and org/repo#5")
+    md = render_report({"ranked": [ev], "errors": ["sync @admin: see #99"]}, make_deps())
+    assert re.search(r"@\w", md) is None
+    assert re.search(r"#\w", md) is None
+    assert "@\u2060octocat" in md
+
+
+def test_report_percent_encodes_ampersand_in_link_target() -> None:
+    ev = HackathonEvent.model_construct(
+        canonical_url="https://a.dev&#64;evil.com", name="A", fit_score=95, sources=[]
+    )
+    row = _top_row(render_report({"ranked": [ev]}, make_deps()))
+    assert "[A](https://a.dev%26#64;evil.com) |" in row
+    assert "&" not in row
+
+
 def test_exit_code_fails_on_many_sync_errors_or_half_the_sources_down() -> None:
     deps = make_deps(sources={"devpost": lambda: [], "mlh": lambda: []})  # + web = 3 sources
     assert exit_code({}, deps) == 0
     assert exit_code({"sync_result": SyncResult()}, deps) == 0
-    assert exit_code({"sync_result": SyncResult(failed=1)}, deps) == 1  # every write failed
+    assert exit_code({"sync_result": SyncResult(failed=1)}, deps) == 0  # one bad row on a quiet day
     assert exit_code({"source_failures": ["mlh"]}, deps) == 0
     assert exit_code({"source_failures": ["mlh", "web"]}, deps) == 1
     assert exit_code({"source_failures": ["mlh", "mlh"]}, deps) == 0  # deduplicated
@@ -130,7 +147,8 @@ def test_exit_code_fails_on_many_sync_errors_or_half_the_sources_down() -> None:
     [
         (SyncResult(created=9, failed=1), 0),  # one bad row: listed, not red
         (SyncResult(created=1, failed=2), 0),  # 2 of 3: below the 3-failure floor
-        (SyncResult(failed=2), 1),  # every attempted write failed
+        (SyncResult(failed=2), 0),  # 2 of 2: still below the 3-failure floor
+        (SyncResult(failed=3), 1),  # 3 of 3
         (SyncResult(created=7, failed=3), 1),  # 3 of 10 = 30%
         (SyncResult(created=12, failed=3), 1),  # 3 of 15 = exactly 20%
         (SyncResult(created=13, failed=3), 0),  # 3 of 16 < 20%
