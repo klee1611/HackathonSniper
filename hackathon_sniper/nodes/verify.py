@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from hackathon_sniper.deps import Deps
 from hackathon_sniper.http import Page
-from hackathon_sniper.llm.base import LLMError
+from hackathon_sniper.llm.base import LLM, LLMError
 from hackathon_sniper.models import (
     Format,
     HackathonEvent,
@@ -215,18 +215,23 @@ def facts_to_event(ev: HackathonEvent, facts: PageFacts, page_text: str) -> Hack
     )
 
 
-def _read_page(ev: HackathonEvent, page: Page, deps: Deps) -> HackathonEvent:
-    """What `page` says about `ev`, with unsupported deadline/prize already dropped."""
+def extract_page_facts(llm: LLM, ev: HackathonEvent, url: str, page_text: str) -> HackathonEvent:
+    """What `page_text` (fetched from `url`) says about `ev`, with unsupported deadline/prize
+    already dropped. The single prompt + evidence path shared by verify and the eval."""
     # The model sees (and quotes are checked against) the same sanitised text: one line,
     # capped, with < and > removed so the page can't forge the closing </page> tag.
-    text = prompt_text(page.text, MAX_PAGE_CHARS)
+    text = prompt_text(page_text, MAX_PAGE_CHARS)
     user = (
         f"Event: {prompt_text(ev.name, MAX_NAME_CHARS)}\n"
-        f"URL: {prompt_text(page.url, MAX_URL_CHARS)}\n\n"
+        f"URL: {prompt_text(url, MAX_URL_CHARS)}\n\n"
         f"<page>\n{text}\n</page>"
     )
-    facts = deps.llm.structured(PageFacts, SYSTEM, user)
+    facts = llm.structured(PageFacts, SYSTEM, user)
     return facts_to_event(ev, facts, text)
+
+
+def _read_page(ev: HackathonEvent, page: Page, deps: Deps) -> HackathonEvent:
+    return extract_page_facts(deps.llm, ev, page.url, page.text)
 
 
 def _fill_from_follow_up(

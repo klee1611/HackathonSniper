@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 USER_AGENT = "HackathonSniper/3.0 (+https://github.com/klee1611/HackathonSniper)"
 _RELATED = re.compile(r"(rules|faq|prizes?|details|terms|eligibility)", re.I)
 _ROBOTS_MAX_BYTES = 512_000
+# Visible-text cap per fetched page (PageFetcher default; the extraction eval reuses it).
+MAX_TEXT_CHARS = 5000
 # Ask for an uncompressed body so the size cap bounds what we actually process.
 _IDENTITY = {"Accept-Encoding": "identity"}
 # Errors that mean "this URL can't be fetched": transport/guard failures and malformed URLs
@@ -253,7 +255,7 @@ def _parse(body: bytes, header_charset: str | None) -> BeautifulSoup:
 
 class PageFetcher:
     def __init__(
-        self, client: httpx.Client, max_chars: int = 5000, max_bytes: int = 2_000_000
+        self, client: httpx.Client, max_chars: int = MAX_TEXT_CHARS, max_bytes: int = 2_000_000
     ) -> None:
         self.client = client
         self.max_chars = max_chars
