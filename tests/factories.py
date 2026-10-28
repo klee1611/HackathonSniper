@@ -1,9 +1,15 @@
+import re
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
 from hackathon_sniper.config import Settings
 from hackathon_sniper.deps import Deps, Source
 from hackathon_sniper.models import HackathonEvent, Profile
+from hackathon_sniper.nodes.plan_queries import QueryPlan
+from hackathon_sniper.nodes.rank import Fit, Ranking
+from hackathon_sniper.nodes.verify import PageFacts
+from hackathon_sniper.nodes.web_search import Extraction
 from hackathon_sniper.notion.mapping import profile_to_properties
 from tests.fakes import FakeFetcher, FakeLLM, FakeNotion, FakeSearch
 
@@ -55,3 +61,19 @@ def make_deps(
         today=TODAY,
         summary_writer=lambda md: None,
     )
+
+
+Handlers = dict[type[Any], Callable[[str], Any]]
+
+
+def llm_handlers(overrides: Handlers | None = None) -> Handlers:
+    """Sensible defaults for every agent: one query, no extraction, empty page facts, score 70."""
+    base: Handlers = {
+        QueryPlan: lambda u: QueryPlan(queries=["ai hackathon"]),
+        Extraction: lambda u: Extraction(events=[]),
+        PageFacts: lambda u: PageFacts(),
+        Ranking: lambda u: Ranking(
+            fits=[Fit(url=x, score=70, reason="ok") for x in re.findall(r'"url": "([^"]+)"', u)]
+        ),
+    }
+    return base | (overrides or {})
