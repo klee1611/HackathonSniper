@@ -6,9 +6,11 @@ load_context -> plan_queries -> (every source + web_search, in parallel) -> dedu
 `max_concurrency` caps how many branches (sources, verify) run at once; it is set from
 `llm_concurrency` because the verify branches are where parallel LLM calls happen.
 A NotionError from load_context propagates out of `run`: nothing is synced without
-knowing the existing rows.
+knowing the existing rows. verify and rank are wrapped so an unexpected exception (a bug,
+a parser crash on one odd page) degrades that step instead of aborting the daily run.
 """
 
+import logging
 from collections.abc import Callable
 from typing import Any, Protocol, cast
 
@@ -17,6 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from hackathon_sniper.deps import Deps
+from hackathon_sniper.models import HackathonEvent
 from hackathon_sniper.nodes.dedupe import dedupe
 from hackathon_sniper.nodes.load_context import load_context
 from hackathon_sniper.nodes.plan_queries import plan_queries
@@ -28,9 +31,13 @@ from hackathon_sniper.nodes.verify import verify
 from hackathon_sniper.nodes.web_search import web_search
 from hackathon_sniper.state import GraphState, VerifyTask
 
+logger = logging.getLogger(__name__)
+
 # Counts supersteps, not branches: a run takes 8 (parallel branches share one), so 50 is
 # plenty however many sources or verify branches there are.
 RECURSION_LIMIT = 50
+# Errors end up in the (public) job summary.
+MAX_ERROR_CHARS = 300
 
 Graph = CompiledStateGraph[GraphState, None, GraphState, GraphState]
 
@@ -61,6 +68,34 @@ def _bind[S](fn: Callable[[S, Deps], dict[str, Any]], deps: Deps) -> Node[S]:
     return node
 
 
+def _error(prefix: str, exc: Exception) -> str:
+    message = f"{prefix}: {type(exc).__name__}: {exc}"
+    return message if len(message) <= MAX_ERROR_CHARS else message[: MAX_ERROR_CHARS - 1] + "…"
+
+
+def safe_verify(task: VerifyTask, deps: Deps) -> dict[str, Any]:
+    """verify, but an unexpected exception keeps the event unchanged and records the error."""
+    try:
+        return verify(task, deps)
+    except Exception as e:  # isolation: one bad page must never abort the run
+        ev = task["event"]
+        logger.exception("verify %s crashed", ev.canonical_url)
+        return {"verified": [ev], "errors": [_error(f"verify {ev.canonical_url}", e)]}
+
+
+def safe_rank(state: GraphState, deps: Deps) -> dict[str, Any]:
+    """rank, but an unexpected exception passes every event through unscored so sync runs."""
+    try:
+        return rank(state, deps)
+    except Exception as e:  # isolation: a ranking crash must not lose the run's discoveries
+        logger.exception("rank crashed")
+        # Keyed by URL like rank itself, so a verified copy replaces a stale passthrough one.
+        events: dict[str, HackathonEvent] = {
+            ev.canonical_url: ev for ev in state.get("passthrough", []) + state.get("verified", [])
+        }
+        return {"ranked": list(events.values()), "errors": [_error("rank", e)]}
+
+
 def build_graph(deps: Deps) -> Graph:
     graph = StateGraph(GraphState)
     graph.add_node("load_context", _bind(load_context, deps))
@@ -72,8 +107,8 @@ def build_graph(deps: Deps) -> Graph:
     graph.add_node("web_search", _bind(web_search, deps))
     branches.append("web_search")
     graph.add_node("dedupe", _bind(dedupe, deps))
-    graph.add_node("verify", _bind(verify, deps), input_schema=VerifyTask)
-    graph.add_node("rank", _bind(rank, deps))
+    graph.add_node("verify", _bind(safe_verify, deps), input_schema=VerifyTask)
+    graph.add_node("rank", _bind(safe_rank, deps))
     graph.add_node("sync_notion", _bind(sync_notion, deps))
     graph.add_node("report", _bind(report, deps))
 
