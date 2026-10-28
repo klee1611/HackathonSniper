@@ -29,5 +29,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          # No dependency cache in jobs holding secrets: a cache saved by another run must not flow in here.
+          enable-cache: false
       - run: uv sync --locked --no-dev
       - run: uv run python -m hackathon_sniper --dry-run --max-verify 5
