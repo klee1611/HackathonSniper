@@ -19,15 +19,19 @@ from hackathon_sniper.models import (
     Verification,
 )
 from hackathon_sniper.nodes.dedupe import merge
-from hackathon_sniper.nodes.web_search import MAX_NAME_CHARS, MAX_THEME_CHARS, MAX_THEMES
-from hackathon_sniper.nodes.web_search import _one_line as one_line
-from hackathon_sniper.nodes.web_search import _prompt_text as prompt_text
 from hackathon_sniper.state import VerifyTask
+from hackathon_sniper.text import (
+    MAX_NAME_CHARS,
+    MAX_THEME_CHARS,
+    MAX_THEMES,
+    MAX_URL_CHARS,
+    one_line,
+    prompt_text,
+)
 
 # Event pages are untrusted web text going into a prompt: bound it (PageFetcher already caps
 # at 8000 chars; this also covers other fetchers) and bound what the model can push back.
 MAX_PAGE_CHARS = 8000
-MAX_URL_CHARS = 500
 MAX_LOCATION_CHARS = 200
 MIN_QUOTE_CHARS = 4
 
@@ -80,49 +84,69 @@ def quote_supported(quote: str | None, text: str) -> bool:
 # Without this the model could cite a real but unrelated sentence ("Big Hack 2026") for any
 # value. Both checks require digits in the quote, so a digit-free quote never counts.
 
-_AMOUNT = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*([km](?![a-z]))?")
 # Rejoin thousands groups split by an inline tag: "$10,<b>000</b>" -> "$10, 000".
 _SPLIT_GROUP = re.compile(r"(?<=[,.])\s+(?=\d{3}(?!\d))")
+_AMOUNT = r"(\d[\d,]*(?:\.\d+)?)(?:\s*([km])(?![a-z]))?"
+# prize_usd is US dollars: only amounts directly attached to $, US$ or USD count.
+_USD_AMOUNT = re.compile(rf"(?:\$|\busd)\s*{_AMOUNT}|(?<![\d.,]){_AMOUNT}\s*usd\b")
 _MULTIPLIERS = {"k": 1_000, "m": 1_000_000}
 
 
-def prize_quote_matches(quote: str, prize_usd: int) -> bool:
-    """True if some amount in `quote` equals `prize_usd`, written plainly or as 10k / 1.5M."""
+def _usd_amounts(quote: str) -> list[float]:
     text = _SPLIT_GROUP.sub("", quote.casefold())
-    for match in _AMOUNT.finditer(text):
+    amounts: list[float] = []
+    for match in _USD_AMOUNT.finditer(text):
+        digits, suffix = match.group(1, 2) if match.group(1) else match.group(3, 4)
         try:
-            number = float(match.group(1).replace(",", ""))
+            number = float(digits.replace(",", ""))
         except ValueError:
             continue
-        values = {number}
-        if match.group(2):
-            values.add(number * _MULTIPLIERS[match.group(2)])
-        if any(round(v) == prize_usd for v in values):
-            return True
-    return False
+        amounts.append(number * _MULTIPLIERS[suffix] if suffix else number)
+    return amounts
 
 
-_MONTHS = re.compile(
-    r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
-    r"|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?![a-z])"
+def prize_quote_matches(quote: str, prize_usd: int) -> bool:
+    """True if a USD amount in `quote` ("$10,000", "USD 10k", "$1.5M", "10,000 USD") equals
+    `prize_usd`, or the amounts sum to it (itemised: "1st: $5,000, 2nd: $3,000, ...")."""
+    amounts = _usd_amounts(quote)
+    return any(round(a) == prize_usd for a in amounts) or (
+        len(amounts) > 1 and round(sum(amounts)) == prize_usd
+    )
+
+
+_MONTH_NAMES = (
+    "january february march april may june july august september october november december"
+).split()
+_MONTH = (
+    r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
+    r"|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 )
+_DAY = r"(\d{1,2})(?:st|nd|rd|th)?"
+# A month name split by an inline tag ("Nov<b>ember</b>" -> "nov ember") is joined back.
+_SPLIT_MONTH = re.compile(
+    r"\b(?:" + "|".join(r"\s?".join(name) for name in _MONTH_NAMES) + r")(?![a-z])"
+)
+# The day must sit right next to the month: "Nov 1", "Nov. 1st", "1 Nov", "1st of November".
+_MONTH_DAY = re.compile(rf"\b{_MONTH}\.?\s*{_DAY}(?!\d)")
+_DAY_MONTH = re.compile(rf"(?<!\d){_DAY}\s*(?:of\s*)?{_MONTH}(?![a-z])")
 _NUMERIC_DATE = re.compile(r"(?<!\d)\d{1,4}[-/.]\d{1,2}(?:[-/.]\d{1,4})?(?!\d)")
 _INT = re.compile(r"\d+")
 
 
 def deadline_quote_matches(quote: str, deadline: date) -> bool:
-    """True if `quote` names the deadline's day AND month.
+    """True if `quote` names the deadline's day AND month together.
 
-    With a month name in the quote ("Nov 1", "1 November", "Nov ember 1st") the name must be
-    the deadline's month and the day must appear as a standalone number. Without one, a
-    numeric date ("2026-11-01", "11/01/2026", "1.11.") must contain both day and month.
-    The year is not required (pages often omit it).
+    If a month name has a day next to it ("Nov 1", "1st of November"), one such pair must be
+    the deadline's. Otherwise a numeric date ("2026-11-01", "01.11.2026", "1/11") must hold
+    both day and month. A bare month word ("you may apply") never counts. The year is not
+    required (pages often omit it).
     """
-    text = quote.casefold()
-    names = {m.group(1)[:3] for m in _MONTHS.finditer(text)}
-    if names:
-        numbers = [int(n) for n in _INT.findall(text)]
-        return deadline.strftime("%b").casefold() in names and deadline.day in numbers
+    text = " ".join(quote.casefold().split())
+    text = _SPLIT_MONTH.sub(lambda m: m.group(0).replace(" ", ""), text)
+    pairs = {(m.group(1)[:3], int(m.group(2))) for m in _MONTH_DAY.finditer(text)}
+    pairs |= {(m.group(2)[:3], int(m.group(1))) for m in _DAY_MONTH.finditer(text)}
+    if pairs:
+        return (deadline.strftime("%b").casefold(), deadline.day) in pairs
     for token in _NUMERIC_DATE.findall(text):
         parts = [int(n) for n in _INT.findall(token)]
         if deadline.day == deadline.month:
@@ -168,7 +192,8 @@ def facts_to_event(ev: HackathonEvent, facts: PageFacts, page_text: str) -> Hack
     )
 
 
-def _read_page(ev: HackathonEvent, page: Page, deps: Deps) -> tuple[HackathonEvent, bool, bool]:
+def _read_page(ev: HackathonEvent, page: Page, deps: Deps) -> HackathonEvent:
+    """What `page` says about `ev`, with unsupported deadline/prize already dropped."""
     # The model sees (and quotes are checked against) the same sanitised text: one line,
     # capped, with < and > removed so the page can't forge the closing </page> tag.
     text = prompt_text(page.text, MAX_PAGE_CHARS)
@@ -178,8 +203,21 @@ def _read_page(ev: HackathonEvent, page: Page, deps: Deps) -> tuple[HackathonEve
         f"<page>\n{text}\n</page>"
     )
     facts = deps.llm.structured(PageFacts, SYSTEM, user)
-    found = facts_to_event(ev, facts, text)
-    return merge(ev, found), found.registration_deadline is not None, found.prize_usd is not None
+    return facts_to_event(ev, facts, text)
+
+
+def _fill_from_follow_up(
+    result: HackathonEvent, more: HackathonEvent, has_deadline: bool, has_prize: bool
+) -> HackathonEvent:
+    """The follow-up (rules/FAQ) page only fills gaps left by the main page, except that a
+    deadline/prize it *proves* replaces one the main page did not prove (e.g. a snippet's)."""
+    filled = merge(result, more.model_copy(update={"origin": Origin.SOURCE}))
+    proven: dict[str, Any] = {}
+    if not has_deadline and more.registration_deadline is not None:
+        proven["registration_deadline"] = more.registration_deadline
+    if not has_prize and more.prize_usd is not None:
+        proven["prize_usd"] = more.prize_usd
+    return filled.model_copy(update=proven)
 
 
 def verify(task: VerifyTask, deps: Deps) -> dict[str, Any]:
@@ -188,19 +226,28 @@ def verify(task: VerifyTask, deps: Deps) -> dict[str, Any]:
     if page is None:
         return {"verified": [ev], "errors": [f"verify {ev.canonical_url}: page unavailable"]}
     try:
-        result, has_deadline, has_prize = _read_page(ev, page, deps)
+        found = _read_page(ev, page, deps)
     except LLMError as e:
         return {"verified": [ev], "errors": [f"verify {ev.canonical_url}: {type(e).__name__}: {e}"]}
+    result = merge(ev, found)
+    has_deadline = found.registration_deadline is not None
+    has_prize = found.prize_usd is not None
 
     errors: list[str] = []
     if not (has_deadline and has_prize) and page.links:
-        extra = deps.fetcher.fetch(page.links[0])
-        if extra is not None:
+        link = page.links[0]
+        extra = deps.fetcher.fetch(link)
+        if extra is None:
+            errors.append(f"verify {link}: page unavailable")
+        else:
             try:
-                result, more_deadline, more_prize = _read_page(result, extra, deps)
-                has_deadline, has_prize = has_deadline or more_deadline, has_prize or more_prize
+                more = _read_page(result, extra, deps)
             except LLMError as e:
                 errors.append(f"verify {extra.url}: {type(e).__name__}: {e}")
+            else:
+                result = _fill_from_follow_up(result, more, has_deadline, has_prize)
+                has_deadline = has_deadline or more.registration_deadline is not None
+                has_prize = has_prize or more.prize_usd is not None
 
     status = Verification.VERIFIED if has_deadline and has_prize else Verification.PARTIAL
     return {

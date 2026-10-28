@@ -1,6 +1,5 @@
 import logging
 import re
-import unicodedata
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -19,6 +18,14 @@ from hackathon_sniper.models import (
 )
 from hackathon_sniper.search import SearchResult
 from hackathon_sniper.state import GraphState
+from hackathon_sniper.text import (
+    MAX_NAME_CHARS,
+    MAX_THEME_CHARS,
+    MAX_THEMES,
+    MAX_URL_CHARS,
+    one_line,
+    prompt_text,
+)
 from hackathon_sniper.urls import try_canonicalize
 
 logger = logging.getLogger(__name__)
@@ -28,11 +35,6 @@ BATCH = 15
 # free-tier token budget predictable).
 MAX_TITLE_CHARS = 200
 MAX_SNIPPET_CHARS = 500
-MAX_URL_CHARS = 500
-# Bound what the model can push into our data.
-MAX_NAME_CHARS = 200
-MAX_THEMES = 10
-MAX_THEME_CHARS = 50
 # Characters that could break out of the <result> delimiters or the url line.
 _UNSAFE_URL = re.compile(r"[\s<>\"]")
 
@@ -70,35 +72,22 @@ class Extraction(BaseModel):
     events: list[ExtractedEvent]
 
 
-def _one_line(text: str, limit: int) -> str:
-    # Drop control/format/bidi characters (category C*: NUL, RLO, zero-width, ...) first;
-    # whitespace controls (\n, \t, \r) are kept so the split below turns them into spaces.
-    text = "".join(c for c in text if c.isspace() or not unicodedata.category(c).startswith("C"))
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[:limit].rstrip()
-
-
-def _prompt_text(text: str, limit: int) -> str:
-    """Untrusted text for the prompt: one line, capped, unable to forge a <result> tag."""
-    return _one_line(text.replace("<", " ").replace(">", " "), limit)
-
-
 def _format_batch(batch: list[tuple[str, SearchResult]]) -> str:
     return "\n".join(
         f'<result id="{n}">\n'
-        f"title: {_prompt_text(r.title, MAX_TITLE_CHARS)}\n"
+        f"title: {prompt_text(r.title, MAX_TITLE_CHARS)}\n"
         f"url: {url}\n"
-        f"snippet: {_prompt_text(r.snippet, MAX_SNIPPET_CHARS)}\n"
+        f"snippet: {prompt_text(r.snippet, MAX_SNIPPET_CHARS)}\n"
         "</result>"
         for n, (url, r) in enumerate(batch, 1)
     )
 
 
 def _to_event(x: ExtractedEvent, url: str) -> HackathonEvent | None:
-    name = _one_line(x.name or "", MAX_NAME_CHARS)
+    name = one_line(x.name or "", MAX_NAME_CHARS)
     if not name:
         return None
-    themes = [t for t in (_one_line(t, MAX_THEME_CHARS) for t in x.themes) if t][:MAX_THEMES]
+    themes = [t for t in (one_line(t, MAX_THEME_CHARS) for t in x.themes) if t][:MAX_THEMES]
     try:
         return HackathonEvent(
             canonical_url=url,

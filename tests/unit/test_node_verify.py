@@ -1,6 +1,8 @@
 from datetime import date
 from typing import Any
 
+import pytest
+
 from hackathon_sniper.http import Page
 from hackathon_sniper.llm.base import LLMBudget
 from hackathon_sniper.models import Format, Origin, Verification
@@ -195,24 +197,128 @@ def test_quote_supported() -> None:
     assert not quote_supported("Total prizes: $20,000", TEXT)
 
 
-def test_prize_quote_matches_plain_k_and_m_forms() -> None:
-    assert prize_quote_matches("Total prizes: $10,000", 10000)
-    assert prize_quote_matches("Win $10k in prizes", 10000)
-    assert prize_quote_matches("A $1.5M prize pool", 1_500_000)
-    assert prize_quote_matches("Prizes: $10, 000", 10000)  # split by an inline tag
-    assert prize_quote_matches("USD 2500 to share", 2500)
-    assert not prize_quote_matches("Total prizes: $10,000", 1000)
-    assert not prize_quote_matches("Prizes worth a lot", 10000)
+@pytest.mark.parametrize(
+    ("quote", "amount"),
+    [
+        ("$10,000 in prizes", 10000),
+        ("Total prizes: $10,000", 10000),
+        ("USD 10k", 10000),
+        ("$10K", 10000),
+        ("Win $10k in prizes", 10000),
+        ("A $1.5M prize pool", 1_500_000),
+        ("$1,500,000", 1_500_000),
+        ("€5,000 + $2,000", 2000),
+        ("(total $10,000)", 10000),
+        ("10,000 USD", 10000),
+        ("US$ 7,500", 7500),
+        ("Prizes: $10, 000", 10000),  # thousands group split by an inline tag
+        ("1st: $5,000, 2nd: $3,000, 3rd: $2,000", 10000),  # itemised: the sum
+        ("1st: $5,000, 2nd: $3,000, 3rd: $2,000", 5000),  # or any one item
+    ],
+)
+def test_prize_quote_matches(quote: str, amount: int) -> None:
+    assert prize_quote_matches(quote, amount)
 
 
-def test_deadline_quote_matches_needs_day_and_month() -> None:
-    d = date(2026, 11, 1)
-    assert deadline_quote_matches("Registration closes November 1, 2026", d)
-    assert deadline_quote_matches("Apply by 1 Nov", d)
-    assert deadline_quote_matches("Nov ember 1st", d)
-    assert deadline_quote_matches("Deadline: 2026-11-01", d)
-    assert deadline_quote_matches("Deadline 11/01/2026", d)
-    assert not deadline_quote_matches("Registration closes November 2026", d)  # no day
-    assert not deadline_quote_matches("Closes on the 1st", d)  # no month
-    assert not deadline_quote_matches("Registration closes December 1, 2026", d)
-    assert not deadline_quote_matches("Big Hack 2026", d)
+@pytest.mark.parametrize(
+    ("quote", "amount"),
+    [
+        ("Hackathon 2026 starts", 2026),
+        ("Registration closes November 1, 2026", 2026),
+        ("Top 3 teams win", 3),
+        ("Over 500 hackers", 500),
+        ("Team of 4. $20,000", 4),
+        ("500k+ users, prize $1,000", 500_000),
+        ("45 m", 45_000_000),
+        ("€5,000", 5000),
+        ("Total prizes: $10,000", 1000),
+        ("Prizes worth a lot", 10000),
+        ("1st: $5,000, 2nd: $3,000, 3rd: $2,000", 7000),
+    ],
+)
+def test_prize_quote_rejects(quote: str, amount: int) -> None:
+    assert not prize_quote_matches(quote, amount)
+
+
+NOV1 = date(2026, 11, 1)
+MAY1 = date(2026, 5, 1)
+
+
+@pytest.mark.parametrize(
+    ("quote", "deadline"),
+    [
+        ("Registration closes November 1, 2026", NOV1),
+        ("Submissions close November 1, 2026 at 11:59 PM PST", NOV1),
+        ("Deadline: 01.11.2026", NOV1),
+        ("Nov 1st", NOV1),
+        ("Nov. 1", NOV1),
+        ("1st of November", NOV1),
+        ("Apply by 1 Nov", NOV1),
+        ("Closes November 1 2026", NOV1),
+        ("2026-11-01T23:59Z", NOV1),
+        ("Deadline 11/01/2026", NOV1),
+        ("Oct 30 – Nov 1, 2026", NOV1),
+        ("Ends 1/11", NOV1),
+        ("Applications close May 1, 2026", MAY1),
+        ("Nov ember 1st", NOV1),  # month name split by an inline tag
+        ("Teams may register until 01.11.2026", NOV1),
+    ],
+)
+def test_deadline_quote_matches(quote: str, deadline: date) -> None:
+    assert deadline_quote_matches(quote, deadline)
+
+
+@pytest.mark.parametrize(
+    ("quote", "deadline"),
+    [
+        ("you may apply until June 1", MAY1),
+        ("Opens Nov 3, closes Dec 1", NOV1),
+        ("Nov 15, 2026 (1 day left)", NOV1),
+        ("Event Nov 20-22. 1 team per person", NOV1),
+        ("Registration closes November 2026", NOV1),  # no day
+        ("Closes on the 1st", NOV1),  # no month
+        ("Registration closes December 1, 2026", NOV1),
+        ("Big Hack 2026", NOV1),
+        ("2026", NOV1),
+    ],
+)
+def test_deadline_quote_rejects(quote: str, deadline: date) -> None:
+    assert not deadline_quote_matches(quote, deadline)
+
+
+# --- follow-up page ----------------------------------------------------------------------
+
+
+def test_unavailable_follow_up_page_is_reported() -> None:
+    rules = f"{URL}/rules"
+    out = run(FakeLLM({PageFacts: lambda u: PageFacts()}), {URL: Page(URL, "Hi", links=[rules])})
+    assert out["errors"] == [f"verify {rules}: page unavailable"]
+    assert out["verified"][0].verification == Verification.PARTIAL
+
+
+def test_follow_up_page_only_fills_gaps() -> None:
+    rules = f"{URL}/rules"
+    pages = {
+        URL: Page(url=URL, text="Big Hack 2026. Online.", links=[rules]),
+        rules: Page(url=rules, text=TEXT),
+    }
+    main = PageFacts(format=Format.ONLINE, location="Online")
+    extra = GOOD.model_copy(update={"format": Format.IN_PERSON, "location": "Berlin"})
+    llm = FakeLLM({PageFacts: lambda u: extra if "/rules" in u else main})
+    (ev,) = run(llm, pages)["verified"]
+    assert (ev.format, ev.location) == (Format.ONLINE, "Online")
+    assert (ev.registration_deadline, ev.prize_usd) == (date(2026, 11, 1), 10000)
+    assert ev.verification == Verification.VERIFIED
+
+
+def test_follow_up_evidence_replaces_unverified_snippet_values() -> None:
+    rules = f"{URL}/rules"
+    pages = {
+        URL: Page(url=URL, text="Big Hack 2026. Online.", links=[rules]),
+        rules: Page(url=rules, text=TEXT),
+    }
+    stale = event(url=URL, name="Big Hack", registration_deadline=date(2026, 10, 1), prize_usd=5)
+    llm = FakeLLM({PageFacts: lambda u: GOOD if "/rules" in u else PageFacts()})
+    fetcher = FakeFetcher(pages)
+    (ev,) = verify({"event": stale}, make_deps(llm=llm, fetcher=fetcher))["verified"]
+    assert (ev.registration_deadline, ev.prize_usd) == (date(2026, 11, 1), 10000)
