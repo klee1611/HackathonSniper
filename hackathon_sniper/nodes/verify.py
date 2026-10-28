@@ -92,26 +92,47 @@ _USD_AMOUNT = re.compile(rf"(?:\$|\busd)\s*{_AMOUNT}|(?<![\d.,]){_AMOUNT}\s*usd\
 _MULTIPLIERS = {"k": 1_000, "m": 1_000_000}
 
 
-def _usd_amounts(quote: str) -> list[float]:
+# A word right next to an amount that marks it as the stated total: "(total $10,000)".
+_TOTAL_WORD = re.compile(r"\b(?:total|pool|overall|combined|in all)\b")
+_TOTAL_WINDOW = 12
+
+
+def _usd_amounts(quote: str) -> list[tuple[int, bool]]:
+    """(amount, labelled-as-total) for each USD amount in `quote`."""
     text = _SPLIT_GROUP.sub("", quote.casefold())
-    amounts: list[float] = []
+    amounts: list[tuple[int, bool]] = []
     for match in _USD_AMOUNT.finditer(text):
         digits, suffix = match.group(1, 2) if match.group(1) else match.group(3, 4)
         try:
             number = float(digits.replace(",", ""))
         except ValueError:
             continue
-        amounts.append(number * _MULTIPLIERS[suffix] if suffix else number)
+        near = text[max(0, match.start() - _TOTAL_WINDOW) : match.end() + _TOTAL_WINDOW]
+        near = near.replace(match.group(0), " ")
+        value = round(number * _MULTIPLIERS[suffix] if suffix else number)
+        amounts.append((value, bool(_TOTAL_WORD.search(near))))
     return amounts
 
 
 def prize_quote_matches(quote: str, prize_usd: int) -> bool:
     """True if a USD amount in `quote` ("$10,000", "USD 10k", "$1.5M", "10,000 USD") equals
-    `prize_usd`, or the amounts sum to it (itemised: "1st: $5,000, 2nd: $3,000, ...")."""
+    `prize_usd`, or distinct itemised amounts sum to it ("1st: $5,000, 2nd: $3,000, ...")."""
     amounts = _usd_amounts(quote)
-    return any(round(a) == prize_usd for a in amounts) or (
-        len(amounts) > 1 and round(sum(amounts)) == prize_usd
-    )
+    if any(value == prize_usd for value, _ in amounts):
+        return True
+    return _sum_is_itemised(amounts) and sum(v for v, _ in amounts) == prize_usd
+
+
+def _sum_is_itemised(amounts: list[tuple[int, bool]]) -> bool:
+    """Summing is only safe for distinct items. Skip it when the quote repeats an amount
+    ("$10,000 $10k") or already states the total: the largest amount equals the sum of the
+    others AND is labelled as a total ("$5k / $3k / $2k (total $10k)"). The label is needed
+    because a plain list can add up the same way (5,000 = 3,000 + 2,000)."""
+    values = [v for v, _ in amounts]
+    if len(values) < 2 or len(set(values)) < len(values):
+        return False
+    largest, labelled = max(amounts)
+    return not (labelled and largest == sum(values) - largest)
 
 
 _MONTH_NAMES = (

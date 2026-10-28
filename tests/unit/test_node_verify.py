@@ -5,7 +5,7 @@ import pytest
 
 from hackathon_sniper.http import Page
 from hackathon_sniper.llm.base import LLMBudget
-from hackathon_sniper.models import Format, Origin, Verification
+from hackathon_sniper.models import Format, Lifecycle, Origin, Verification
 from hackathon_sniper.nodes.verify import (
     MAX_LOCATION_CHARS,
     MAX_THEME_CHARS,
@@ -214,6 +214,9 @@ def test_quote_supported() -> None:
         ("Prizes: $10, 000", 10000),  # thousands group split by an inline tag
         ("1st: $5,000, 2nd: $3,000, 3rd: $2,000", 10000),  # itemised: the sum
         ("1st: $5,000, 2nd: $3,000, 3rd: $2,000", 5000),  # or any one item
+        ("$5,000 / $3,000 / $2,000 (total $10,000)", 10000),
+        ("$10,000 $10k", 10000),
+        ("Total prizes: 1st $5,000, 2nd $3,000, 3rd $2,000", 10000),
     ],
 )
 def test_prize_quote_matches(quote: str, amount: int) -> None:
@@ -234,6 +237,8 @@ def test_prize_quote_matches(quote: str, amount: int) -> None:
         ("Total prizes: $10,000", 1000),
         ("Prizes worth a lot", 10000),
         ("1st: $5,000, 2nd: $3,000, 3rd: $2,000", 7000),
+        ("$5,000 / $3,000 / $2,000 (total $10,000)", 20000),  # total already stated
+        ("$10,000 $10k", 20000),  # the same amount twice
     ],
 )
 def test_prize_quote_rejects(quote: str, amount: int) -> None:
@@ -322,3 +327,22 @@ def test_follow_up_evidence_replaces_unverified_snippet_values() -> None:
     fetcher = FakeFetcher(pages)
     (ev,) = verify({"event": stale}, make_deps(llm=llm, fetcher=fetcher))["verified"]
     assert (ev.registration_deadline, ev.prize_usd) == (date(2026, 11, 1), 10000)
+
+
+def test_follow_up_merge_keeps_event_owned_fields() -> None:
+    rules = f"{URL}/rules"
+    pages = {
+        URL: Page(url=URL, text="Big Hack 2026. Online.", links=[rules]),
+        rules: Page(url=rules, text=TEXT),
+    }
+    owned = {
+        "notion_page_id": "page-1",
+        "fit_score": 7,
+        "fit_reason": "matches AI",
+        "lifecycle": Lifecycle.EXPIRED,
+    }
+    llm = FakeLLM({PageFacts: lambda u: GOOD if "/rules" in u else PageFacts()})
+    task = {"event": event(url=URL, name="Big Hack", **owned)}
+    (ev,) = verify(task, make_deps(llm=llm, fetcher=FakeFetcher(pages)))["verified"]
+    assert len(llm.calls) == 2 and ev.verification == Verification.VERIFIED
+    assert {k: getattr(ev, k) for k in owned} == owned
