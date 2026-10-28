@@ -1,7 +1,8 @@
 """Per-field accuracy of the Verifier on hand-labeled pages. Uses the real Groq API.
 
-Measures production behaviour: the HTML goes through the fetcher's html_to_text and text cap,
-then verify's own prompt and evidence checks (extract_page_facts). See evals/cases/README.md.
+Measures production behaviour: the HTML bytes are decoded and capped exactly as the fetcher does
+(html_bytes_to_text, MAX_TEXT_CHARS), then go through verify's own prompt and evidence checks
+(extract_page_facts). Scores the main page only. See evals/cases/README.md.
 Needs only GROQ_API_KEY (and optionally GROQ_MODEL) from the environment or .env.
 
 Run: uv run python evals/extraction_eval.py
@@ -23,7 +24,7 @@ if _ROOT not in sys.path:
 from dotenv import load_dotenv  # noqa: E402
 
 from hackathon_sniper.config import Settings  # noqa: E402
-from hackathon_sniper.http import MAX_TEXT_CHARS, html_to_text  # noqa: E402
+from hackathon_sniper.http import MAX_TEXT_CHARS, html_bytes_to_text  # noqa: E402
 from hackathon_sniper.llm.base import LLM, BudgetExceeded, LLMBudget, LLMError  # noqa: E402
 from hackathon_sniper.llm.groq import GroqLLM  # noqa: E402
 from hackathon_sniper.models import HackathonEvent  # noqa: E402
@@ -82,8 +83,14 @@ def run_eval(cases_dir: Path, llm: LLM) -> str:
         except InvalidCase as e:
             lines.append(f"error {name}: invalid case: {e}")
             continue
-        # Exactly what PageFetcher hands the Verifier: visible text, capped.
-        text = html_to_text(html_file.read_text(encoding="utf-8", errors="replace"))
+        # Exactly what PageFetcher hands the Verifier: bytes decoded the same way, visible
+        # text, capped. (A saved file has no Content-Type header, so the page's own
+        # <meta charset> decides, as for a response without one.)
+        try:
+            text = html_bytes_to_text(html_file.read_bytes())
+        except (LookupError, ValueError) as e:  # the fetcher drops such pages too
+            lines.append(f"error {name}: could not parse {html_file.name}: {e!r}")
+            continue
         stub = HackathonEvent(canonical_url=url, name=name)
         try:
             found = extract_page_facts(llm, stub, url, text[:MAX_TEXT_CHARS])

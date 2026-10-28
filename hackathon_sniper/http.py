@@ -253,6 +253,12 @@ def _parse(body: bytes, header_charset: str | None) -> BeautifulSoup:
     return BeautifulSoup(body, "html.parser", from_encoding=declared)
 
 
+def html_bytes_to_text(body: bytes, header_charset: str | None = None) -> str:
+    """Visible text of raw HTML bytes, decoded exactly as PageFetcher decodes a response
+    (header charset, else the document's declared one). Uncapped: callers apply the cap."""
+    return _soup_text(_parse(body, header_charset))
+
+
 class PageFetcher:
     def __init__(
         self, client: httpx.Client, max_chars: int = MAX_TEXT_CHARS, max_bytes: int = 2_000_000

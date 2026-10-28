@@ -163,3 +163,13 @@ def test_main_without_key_exits_cleanly(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(SystemExit, match="GROQ_API_KEY"):
         extraction_eval.main()
+
+
+def test_decodes_declared_charset_like_the_fetcher(tmp_path: Path) -> None:
+    _case(tmp_path, "cafe", {"format": "Online"}, None)
+    html = '<html><head><meta charset="windows-1252"></head><body><p>Caf\u00e9 Hack</p></body>'
+    (tmp_path / "cafe.html").write_bytes(html.encode("windows-1252"))
+    llm = FakeLLM({PageFacts: lambda _: PageFacts()})
+    run_eval(tmp_path, llm)
+    (_, user), *_ = llm.calls
+    assert "Caf\u00e9 Hack" in user
