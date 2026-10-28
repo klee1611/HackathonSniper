@@ -309,3 +309,63 @@ def test_verified_copy_wins_over_passthrough_duplicate() -> None:
     out = rank({"profile": Profile(), "passthrough": [old], "verified": [new]}, make_deps(llm=llm))
     assert [(e.name, e.fit_score) for e in out["ranked"]] == [("New", 77)]
     assert len(llm.calls) == 1
+
+
+# --- review fixes ---------------------------------------------------------------------------
+
+
+def test_stale_filtered_event_is_rescored_when_filter_no_longer_applies() -> None:
+    ev = event(
+        url="https://a.dev",
+        prize_usd=500,
+        fit_score=0,
+        fit_reason="Filtered: Prize $500 below minimum $1,000",
+        verified_at=TODAY - timedelta(days=3),
+    )
+    llm = FakeLLM({Ranking: score_all(66)})
+    out = rank({"profile": Profile(min_prize_usd=100), "passthrough": [ev]}, make_deps(llm=llm))
+    assert len(llm.calls) == 1
+    assert (out["ranked"][0].fit_score, out["ranked"][0].fit_reason) == (66, "Matches AI")
+
+
+def test_new_events_are_scored_before_rescores_when_budget_is_short() -> None:
+    rescores = [
+        event(url=f"https://a{i:02d}.dev", fit_score=50, fit_reason="old", verified_at=TODAY)
+        for i in range(BATCH)
+    ]
+    new = [event(url=f"https://z{i}.dev", verified_at=TODAY) for i in range(3)]
+    llm = FakeLLM({Ranking: score_all(80)}, budget=LLMBudget(1))
+    out = rank({"profile": Profile(), "verified": rescores + new}, make_deps(llm=llm))
+    assert len(llm.calls) == 1
+    sent = re.findall(URL_RE, llm.calls[0][1])
+    assert sent[:3] == [e.canonical_url for e in new]
+    by_url = {e.canonical_url: e for e in out["ranked"]}
+    assert all(by_url[e.canonical_url].fit_score == 80 for e in new)
+    assert len(out["errors"]) == 1
+
+
+def test_unscored_sorts_between_positive_and_filtered() -> None:
+    old = TODAY - timedelta(days=1)
+    evs = [
+        event(url="https://f.dev", fit_score=0, fit_reason="x", verified_at=old),
+        event(url="https://n2.dev"),
+        event(url="https://n1.dev"),
+        event(url="https://p.dev", fit_score=5, fit_reason="x", verified_at=old),
+    ]
+    out = rank(
+        {"profile": Profile(), "passthrough": evs},
+        make_deps(llm=FakeLLM({Ranking: lambda u: Ranking()})),
+    )
+    assert [e.canonical_url for e in out["ranked"]] == [
+        "https://p.dev",
+        "https://n1.dev",
+        "https://n2.dev",
+        "https://f.dev",
+    ]
+
+
+def test_null_items_in_fits_are_dropped() -> None:
+    parsed = Ranking.model_validate(
+        {"fits": [None, {"url": "https://a.dev", "score": 70, "reason": "ok"}]}
+    )
+    assert [(f.url, f.score) for f in parsed.fits] == [("https://a.dev", 70)]

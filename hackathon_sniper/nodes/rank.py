@@ -25,6 +25,7 @@ BATCH = 10
 MAX_DESCRIPTION_CHARS = 300
 MAX_LOCATION_CHARS = 200
 MAX_REASON_CHARS = 300
+FILTERED = "Filtered: "
 
 SYSTEM = (
     "You rank hackathons for one developer. Score 0-100 how well each event fits their "
@@ -79,8 +80,10 @@ class Ranking(BaseModel):
 
     @field_validator("fits", mode="before")
     @classmethod
-    def _none_is_empty(cls, v: Any) -> Any:
-        return [] if v is None else v
+    def _drop_nulls(cls, v: Any) -> Any:
+        if v is None:
+            return []
+        return [f for f in v if f is not None] if isinstance(v, list) else v
 
 
 def _format_ok(ev: HackathonEvent, preferred: list[Format]) -> bool:
@@ -144,6 +147,24 @@ def _apply(ev: HackathonEvent, fit: Fit | None) -> HackathonEvent:
     return ev.model_copy(update={"fit_score": fit.score, "fit_reason": reason})
 
 
+def _needs_score(ev: HackathonEvent, today: date) -> bool:
+    # A stored "Filtered: ..." score is stale once the filter no longer applies.
+    return (
+        ev.fit_score is None
+        or (ev.fit_reason or "").startswith(FILTERED)
+        or ev.verified_at == today
+    )
+
+
+def _order(ev: HackathonEvent) -> tuple[int, int, str]:
+    """Positive scores (desc), then unscored, then zero/filtered; ties by URL."""
+    if ev.fit_score is None:
+        return (1, 0, ev.canonical_url)
+    if ev.fit_score > 0:
+        return (0, -ev.fit_score, ev.canonical_url)
+    return (2, 0, ev.canonical_url)
+
+
 def rank(state: GraphState, deps: Deps) -> dict[str, Any]:
     profile = state["profile"]
     # Keyed by URL so a verified copy replaces a stale passthrough one.
@@ -156,12 +177,21 @@ def rank(state: GraphState, deps: Deps) -> dict[str, Any]:
         reason = hard_filter_reason(ev, profile, deps.today)
         if reason:
             ranked[url] = ev.model_copy(
-                update={"fit_score": 0, "fit_reason": f"Filtered: {reason}"}
+                update={"fit_score": 0, "fit_reason": f"{FILTERED}{reason}"}
             )
-        elif ev.fit_score is None or ev.verified_at == deps.today:
+        elif _needs_score(ev, deps.today):
             to_score.append(ev)
         else:
             ranked[url] = ev
+    # New events first, re-scores last, so a short budget is spent where it matters most.
+    to_score.sort(
+        key=lambda e: (
+            e.fit_score is not None,
+            e.verified_at != deps.today,
+            e.closing_date() or date.max,
+            e.canonical_url,
+        )
+    )
 
     context = (
         f"Profile:\n{profile_summary(profile)}\n\n"
@@ -185,5 +215,5 @@ def rank(state: GraphState, deps: Deps) -> dict[str, Any]:
         for ev in batch:
             ranked[ev.canonical_url] = _apply(ev, fits.get(ev.canonical_url))
 
-    ordered = sorted(ranked.values(), key=lambda e: (-(e.fit_score or 0), e.canonical_url))
+    ordered = sorted(ranked.values(), key=_order)
     return {"ranked": ordered, "errors": errors}
