@@ -115,3 +115,13 @@ def test_other_bad_request_is_not_repaired() -> None:
     with pytest.raises(LLMError, match="model_not_found"):
         llm.structured(Answer, "sys", "user")
     assert llm.budget.used == 1
+
+
+def test_budget_remaining_is_floored_at_zero() -> None:
+    budget = LLMBudget(2)
+    assert budget.remaining == 2
+    budget.take()
+    assert budget.remaining == 1
+    assert LLMBudget(0).remaining == 0
+    budget.limit = 0
+    assert budget.remaining == 0

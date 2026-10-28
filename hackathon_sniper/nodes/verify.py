@@ -30,10 +30,12 @@ from hackathon_sniper.text import (
 )
 
 # Event pages are untrusted web text going into a prompt: bound it (PageFetcher already caps
-# at 8000 chars; this also covers other fetchers) and bound what the model can push back.
-MAX_PAGE_CHARS = 8000
+# at 5000 chars; this also covers other fetchers) and bound what the model can push back.
+# Kept small because Groq's free tier is limited by tokens per minute/day, not calls.
+MAX_PAGE_CHARS = 5000
 MAX_LOCATION_CHARS = 200
 MIN_QUOTE_CHARS = 4
+RESERVED = "budget reserved for ranking"
 
 SYSTEM = (
     "You read a hackathon web page and extract facts. Use only what the page states. "
@@ -241,8 +243,15 @@ def _fill_from_follow_up(
     return filled.model_copy(update=proven)
 
 
+def _budget_reserved(deps: Deps) -> bool:
+    """True when another verify call would eat into the calls kept back for ranking."""
+    return deps.llm.budget.remaining <= deps.settings.rank_budget_reserve
+
+
 def verify(task: VerifyTask, deps: Deps) -> dict[str, Any]:
     ev = task["event"]
+    if _budget_reserved(deps):
+        return {"verified": [ev], "errors": [f"verify {ev.canonical_url}: {RESERVED}"]}
     page = deps.fetcher.fetch(ev.canonical_url)
     if page is None:
         return {"verified": [ev], "errors": [f"verify {ev.canonical_url}: page unavailable"]}
@@ -257,8 +266,11 @@ def verify(task: VerifyTask, deps: Deps) -> dict[str, Any]:
     errors: list[str] = []
     if not (has_deadline and has_prize) and page.links:
         link = page.links[0]
-        extra = deps.fetcher.fetch(link)
-        if extra is None:
+        reserved = _budget_reserved(deps)
+        extra = None if reserved else deps.fetcher.fetch(link)
+        if reserved:
+            errors.append(f"verify {link}: {RESERVED}")
+        elif extra is None:
             errors.append(f"verify {link}: page unavailable")
         else:
             try:

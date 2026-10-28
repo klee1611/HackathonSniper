@@ -253,7 +253,7 @@ def _parse(body: bytes, header_charset: str | None) -> BeautifulSoup:
 
 class PageFetcher:
     def __init__(
-        self, client: httpx.Client, max_chars: int = 8000, max_bytes: int = 2_000_000
+        self, client: httpx.Client, max_chars: int = 5000, max_bytes: int = 2_000_000
     ) -> None:
         self.client = client
         self.max_chars = max_chars

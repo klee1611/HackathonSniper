@@ -28,9 +28,11 @@ class Settings(BaseSettings):
     mlh_season: str | None = None
     max_queries: int = Field(default=10, ge=1)
     results_per_query: int = Field(default=10, ge=1)
-    max_verify: int = Field(default=25, ge=0)
+    max_verify: int = Field(default=15, ge=0)
     llm_call_budget: int = Field(default=60, ge=1)
     llm_concurrency: int = Field(default=2, ge=1)
+    # LLM calls verify leaves unspent so the Ranker can still score this run's events.
+    rank_budget_reserve: int = Field(default=8, ge=0)
     reverify_after_days: int = Field(default=7, ge=0)
     dry_run: bool = False
 

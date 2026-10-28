@@ -22,6 +22,11 @@ class LLMBudget:
         self.used = 0
         self._lock = threading.Lock()
 
+    @property
+    def remaining(self) -> int:
+        with self._lock:
+            return max(0, self.limit - self.used)
+
     def take(self) -> None:
         with self._lock:
             if self.used >= self.limit:

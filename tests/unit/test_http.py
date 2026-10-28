@@ -500,3 +500,7 @@ def test_embedded_ips_unwraps_ipv4_compatible() -> None:
 
 def test_client_ignores_environment_proxies() -> None:
     assert make_client().trust_env is False
+
+
+def test_default_text_cap_is_token_aware() -> None:
+    assert PageFetcher(make_client()).max_chars == 5000

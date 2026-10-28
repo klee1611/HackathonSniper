@@ -25,7 +25,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
 def test_reads_env_with_defaults(env: pytest.MonkeyPatch) -> None:
     env.setenv("BRAVE_API_KEY", "b")
     s = Settings(_env_file=None)
-    assert (s.search_provider, s.max_verify, s.dry_run) == ("brave", 25, False)
+    assert (s.search_provider, s.max_verify, s.dry_run) == ("brave", 15, False)
     assert s.notion_hackathons_db_id == "h"
 
 
@@ -39,7 +39,7 @@ def test_requires_key_for_selected_provider(env: pytest.MonkeyPatch) -> None:
 def test_empty_env_value_is_treated_as_unset(env: pytest.MonkeyPatch) -> None:
     env.setenv("BRAVE_API_KEY", "b")
     env.setenv("MAX_VERIFY", "")
-    assert Settings(_env_file=None).max_verify == 25
+    assert Settings(_env_file=None).max_verify == 15
 
 
 def test_empty_required_value_is_rejected(env: pytest.MonkeyPatch) -> None:
@@ -69,7 +69,7 @@ def test_numeric_bounds(override: dict[str, int]) -> None:
 def test_shell_env_does_not_leak_into_factories() -> None:
     # conftest clears Settings env vars, so e.g. SEARCH_PROVIDER=serpapi in the shell is ignored.
     s = make_settings()
-    assert (s.search_provider, s.max_verify) == ("brave", 25)
+    assert (s.search_provider, s.max_verify) == ("brave", 15)
 
 
 def test_strips_surrounding_whitespace_from_string_settings(env: pytest.MonkeyPatch) -> None:
@@ -78,3 +78,9 @@ def test_strips_surrounding_whitespace_from_string_settings(env: pytest.MonkeyPa
     s = Settings(_env_file=None)
     assert s.notion_hackathons_db_id == "abc"
     assert s.brave_api_key == "b"
+
+
+def test_rank_budget_reserve_default_and_bounds() -> None:
+    assert make_settings().rank_budget_reserve == 8
+    with pytest.raises(ValidationError):
+        make_settings(rank_budget_reserve=-1)

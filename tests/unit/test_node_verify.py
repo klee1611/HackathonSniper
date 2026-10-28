@@ -8,6 +8,7 @@ from hackathon_sniper.llm.base import LLMBudget
 from hackathon_sniper.models import Format, Lifecycle, Origin, Verification
 from hackathon_sniper.nodes.verify import (
     MAX_LOCATION_CHARS,
+    MAX_PAGE_CHARS,
     MAX_THEME_CHARS,
     MAX_THEMES,
     SYSTEM,
@@ -34,9 +35,10 @@ GOOD = PageFacts(
 )
 
 
-def run(llm: FakeLLM, pages: dict[str, Page]) -> dict[str, Any]:
+def run(llm: FakeLLM, pages: dict[str, Page], **settings: Any) -> dict[str, Any]:
     return verify(
-        {"event": event(url=URL, name="Big Hack")}, make_deps(llm=llm, fetcher=FakeFetcher(pages))
+        {"event": event(url=URL, name="Big Hack")},
+        make_deps(llm=llm, fetcher=FakeFetcher(pages), **settings),
     )
 
 
@@ -103,7 +105,9 @@ def test_unreachable_page_returns_event_unchanged() -> None:
 
 def test_llm_failure_returns_event_unchanged() -> None:
     out = run(
-        FakeLLM({PageFacts: lambda u: GOOD}, budget=LLMBudget(0)), {URL: Page(url=URL, text=TEXT)}
+        FakeLLM({PageFacts: lambda u: GOOD}, budget=LLMBudget(0)),
+        {URL: Page(url=URL, text=TEXT)},
+        rank_budget_reserve=0,
     )
     assert out["verified"] == [event(url=URL, name="Big Hack")] and "budget" in out["errors"][0]
 
@@ -115,7 +119,7 @@ def test_budget_exhausted_on_follow_up_keeps_first_page_result() -> None:
         rules: Page(url=rules, text=TEXT),
     }
     llm = FakeLLM({PageFacts: lambda u: GOOD}, budget=LLMBudget(1))
-    out = run(llm, pages)
+    out = run(llm, pages, rank_budget_reserve=0)
     (ev,) = out["verified"]
     assert (ev.registration_deadline, ev.prize_usd) == (date(2026, 11, 1), None)
     assert ev.verification == Verification.PARTIAL and "budget" in out["errors"][0]
@@ -346,3 +350,40 @@ def test_follow_up_merge_keeps_event_owned_fields() -> None:
     (ev,) = verify(task, make_deps(llm=llm, fetcher=FakeFetcher(pages)))["verified"]
     assert len(llm.calls) == 2 and ev.verification == Verification.VERIFIED
     assert {k: getattr(ev, k) for k in owned} == owned
+
+
+# --- budget reserved for ranking -----------------------------------------------------------
+
+
+def test_no_llm_call_when_remaining_budget_is_at_reserve() -> None:
+    llm = FakeLLM({PageFacts: lambda u: GOOD}, budget=LLMBudget(8))
+    out = run(llm, {URL: Page(url=URL, text=TEXT)}, rank_budget_reserve=8)
+    assert llm.calls == []
+    assert out["verified"] == [event(url=URL, name="Big Hack")]
+    assert out["errors"] == [f"verify {URL}: budget reserved for ranking"]
+
+
+def test_llm_called_when_remaining_budget_is_above_reserve() -> None:
+    llm = FakeLLM({PageFacts: lambda u: GOOD}, budget=LLMBudget(9))
+    out = run(llm, {URL: Page(url=URL, text=TEXT)}, rank_budget_reserve=8)
+    assert len(llm.calls) == 1 and out["errors"] == []
+    assert out["verified"][0].verification == Verification.VERIFIED
+
+
+def test_follow_up_skipped_when_it_would_eat_the_reserve() -> None:
+    rules = f"{URL}/rules"
+    pages = {
+        URL: Page(url=URL, text="Registration closes November 1, 2026.", links=[rules]),
+        rules: Page(url=rules, text=TEXT),
+    }
+    llm = FakeLLM({PageFacts: lambda u: GOOD}, budget=LLMBudget(9))
+    out = run(llm, pages, rank_budget_reserve=8)
+    assert len(llm.calls) == 1
+    (ev,) = out["verified"]
+    assert (ev.registration_deadline, ev.prize_usd) == (date(2026, 11, 1), None)
+    assert ev.verification == Verification.PARTIAL and ev.verified_at == TODAY
+    assert out["errors"] == [f"verify {rules}: budget reserved for ranking"]
+
+
+def test_prompt_page_cap_is_token_aware() -> None:
+    assert MAX_PAGE_CHARS == 5000
