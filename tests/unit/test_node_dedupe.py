@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from hackathon_sniper.models import Format, Lifecycle, Origin, Verification
+from hackathon_sniper.models import Format, HackathonEvent, Lifecycle, Origin, Verification
 from hackathon_sniper.nodes.dedupe import MAX_THEMES, dedupe, merge
 from tests.factories import TODAY, event, make_deps
 
@@ -160,3 +160,63 @@ def test_verify_order_is_deterministic_regardless_of_input_order() -> None:
             "https://c.dev",
             "https://d.dev",
         ]
+
+
+def test_extended_deadline_on_verified_row_is_reverified() -> None:
+    row = event(
+        url="https://ext.dev",
+        notion_page_id="p1",
+        origin=Origin.PAGE,
+        verification=Verification.VERIFIED,
+        verified_at=TODAY - timedelta(days=1),
+        registration_deadline=TODAY - timedelta(days=1),
+    )
+    candidate = event(
+        url="https://ext.dev",
+        origin=Origin.SOURCE,
+        sources=["devpost"],
+        registration_deadline=TODAY + timedelta(days=10),
+    )
+    out = dedupe({"existing": {row.canonical_url: row}, "candidates": [candidate]}, make_deps())
+    assert [e.canonical_url for e in out["to_verify"]] == ["https://ext.dev"]
+    assert out["passthrough"] == []
+
+
+def test_same_origin_candidates_do_not_churn_full_theme_list() -> None:
+    stored = [f"t{i:02d}" for i in range(MAX_THEMES)]
+    row = event(notion_page_id="p1", origin=Origin.SOURCE, themes=stored)
+    day1 = merge(row, event(origin=Origin.SOURCE, themes=["aaa", "bbb"]))
+    day2 = merge(day1, event(origin=Origin.SOURCE, themes=["ccc"]))
+    assert day1.themes == stored
+    assert day2.themes == stored
+
+
+def test_candidate_folding_is_order_independent() -> None:
+    devpost = event(name="From Devpost", origin=Origin.SOURCE, sources=["devpost"], prize_usd=100)
+    web = event(name="From Web", origin=Origin.SOURCE, sources=["web"], prize_usd=200)
+    outs = [
+        dedupe({"existing": {}, "candidates": order}, make_deps())["to_verify"]
+        for order in ([devpost, web], [web, devpost])
+    ]
+    assert outs[0] == outs[1]
+    assert len(outs[0]) == 1
+
+
+def test_reverify_order_prefers_closing_soon_then_stalest() -> None:
+    def row(name: str, closes_in: int, verified_ago: int) -> HackathonEvent:
+        return event(
+            url=f"https://{name}.dev",
+            name=name,
+            notion_page_id=name,
+            registration_deadline=TODAY + timedelta(days=closes_in),
+            verified_at=TODAY - timedelta(days=verified_ago),
+        )
+
+    rows = [row("fresher", 100, 8), row("stalest", 100, 30), row("soon", 3, 8)]
+    existing = {r.canonical_url: r for r in rows}
+    out = dedupe({"existing": existing, "candidates": []}, make_deps())
+    assert [e.canonical_url for e in out["to_verify"]] == [
+        "https://soon.dev",
+        "https://stalest.dev",
+        "https://fresher.dev",
+    ]

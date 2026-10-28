@@ -53,7 +53,8 @@ def merge(base: HackathonEvent, new: HackathonEvent) -> HackathonEvent:
         if _empty(getattr(base, field)) and not _empty(getattr(new, field)):
             update[field] = getattr(new, field)
     update["sources"] = sorted(set(base.sources) | set(new.sources))
-    preferred, other = (new, base) if stronger else (base, new)
+    # Themes switch sides only on a strictly stronger origin, so a full list doesn't churn daily.
+    preferred, other = (new, base) if new.origin > base.origin else (base, new)
     update["themes"] = _merge_themes(preferred.themes, other.themes)
     update["origin"] = max(base.origin, new.origin)
     update["last_seen"] = max((d for d in (base.last_seen, new.last_seen) if d), default=None)
@@ -68,17 +69,37 @@ def _needs_verification(ev: HackathonEvent, today: date, after_days: int) -> boo
     return ev.verified_at is None or (today - ev.verified_at).days >= after_days
 
 
-def _verify_priority(ev: HackathonEvent) -> tuple[bool, date, str]:
-    """New events first, then the soonest deadline; URL breaks ties deterministically."""
-    return ev.notion_page_id is not None, ev.closing_date() or date.max, ev.canonical_url
+def _verify_priority(ev: HackathonEvent, today: date, window: int) -> tuple[int, date, str]:
+    """(a) new events by soonest deadline; (b) existing rows closing within `window` days by
+    soonest deadline; (c) other existing rows by oldest verification. URL breaks ties."""
+    closing = ev.closing_date()
+    if ev.notion_page_id is None:
+        return 0, closing or date.max, ev.canonical_url
+    if closing is not None and (closing - today).days <= window:
+        return 1, closing, ev.canonical_url
+    return 2, ev.verified_at or date.min, ev.canonical_url
+
+
+def _fold_order(c: HackathonEvent) -> tuple[int, tuple[str, ...], str, str]:
+    """Highest origin is merged last; equal origins fold in a fixed order by source and name."""
+    return c.origin, tuple(sorted(c.sources)), c.name, c.canonical_url
+
+
+def _extended(merged: HackathonEvent, candidate: HackathonEvent | None, today: date) -> bool:
+    """The stored event looks expired but today's candidate carries a deadline still open."""
+    if candidate is None or not merged.is_expired(today):
+        return False
+    closing = candidate.closing_date()
+    return closing is not None and closing >= today
 
 
 def dedupe(state: GraphState, deps: Deps) -> dict[str, Any]:
     today = deps.today
+    window = deps.settings.reverify_after_days
     existing = state.get("existing", {})
 
     seen: dict[str, HackathonEvent] = {}
-    for candidate in state.get("candidates", []):
+    for candidate in sorted(state.get("candidates", []), key=_fold_order):
         candidate = candidate.model_copy(update={"last_seen": today})
         url = candidate.canonical_url
         seen[url] = merge(seen[url], candidate) if url in seen else candidate
@@ -90,15 +111,15 @@ def dedupe(state: GraphState, deps: Deps) -> dict[str, Any]:
 
     to_verify: list[HackathonEvent] = []
     passthrough: list[HackathonEvent] = []
-    for ev in pool.values():
-        if ev.is_expired(today) or not _needs_verification(
-            ev, today, deps.settings.reverify_after_days
+    for url, ev in pool.items():
+        if _extended(ev, seen.get(url), today) or (
+            not ev.is_expired(today) and _needs_verification(ev, today, window)
         ):
-            passthrough.append(ev)
-        else:
             to_verify.append(ev)
+        else:
+            passthrough.append(ev)
 
-    to_verify.sort(key=_verify_priority)
+    to_verify.sort(key=lambda e: _verify_priority(e, today, window))
     passthrough.sort(key=lambda e: e.canonical_url)
     cap = deps.settings.max_verify
     return {"to_verify": to_verify[:cap], "passthrough": passthrough + to_verify[cap:]}
