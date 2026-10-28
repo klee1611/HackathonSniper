@@ -2,7 +2,10 @@ from datetime import date
 from typing import Any
 
 from hackathon_sniper.config import Settings
-from hackathon_sniper.models import HackathonEvent
+from hackathon_sniper.deps import Deps, Source
+from hackathon_sniper.models import HackathonEvent, Profile
+from hackathon_sniper.notion.mapping import profile_to_properties
+from tests.fakes import FakeFetcher, FakeLLM, FakeNotion, FakeSearch
 
 TODAY = date(2026, 10, 26)
 
@@ -21,3 +24,27 @@ def make_settings(**overrides: Any) -> Settings:
 
 def event(url: str = "https://a.devpost.com", name: str = "A", **fields: Any) -> HackathonEvent:
     return HackathonEvent(canonical_url=url, name=name, **fields)
+
+
+def make_deps(
+    *,
+    llm: FakeLLM | None = None,
+    search: FakeSearch | None = None,
+    sources: dict[str, Source] | None = None,
+    notion: FakeNotion | None = None,
+    fetcher: FakeFetcher | None = None,
+    **settings: Any,
+) -> Deps:
+    notion = notion or FakeNotion()
+    if "profile" not in notion.pages:
+        notion.add_page(None, profile_to_properties(Profile(interests=["AI"])), page_id="profile")
+    return Deps(
+        settings=make_settings(**settings),
+        llm=llm or FakeLLM(),
+        search=search or FakeSearch({}),
+        sources=sources if sources is not None else {},
+        notion=notion,
+        fetcher=fetcher or FakeFetcher({}),
+        today=TODAY,
+        summary_writer=lambda md: None,
+    )
