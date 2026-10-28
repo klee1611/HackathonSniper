@@ -46,8 +46,11 @@ _PAGE_ID = re.compile(
 )
 
 
-def parse_page_id(value: str) -> str:
-    """A raw/dashed Notion id or a pasted page URL, normalised to 32 lowercase hex digits."""
+def parse_page_id(value: str, label: str = "--parent-page") -> str:
+    """A raw/dashed Notion id or a pasted Notion URL, normalised to 32 lowercase hex digits.
+
+    `label` names the flag or env var in the error message.
+    """
     text = value.strip().lower()
     if text.startswith(("http://", "https://")):
         text = urlsplit(text).path.rstrip("/").rsplit("/", 1)[-1]
@@ -55,9 +58,7 @@ def parse_page_id(value: str) -> str:
         text = ""
     match = _PAGE_ID.search(text)
     if not match or (match.start(1) > 0 and text[match.start(1) - 1] != "-"):
-        raise SystemExit(
-            "--parent-page must be a Notion page id (32 hex characters) or the page's URL."
-        )
+        raise SystemExit(f"{label} must be a Notion id (32 hex characters) or its Notion URL.")
     return match.group(1).replace("-", "")
 
 
@@ -96,6 +97,39 @@ def _env(name: str, required: bool = True) -> str:
     return value
 
 
+def _env_id(name: str, required: bool = True) -> str:
+    """A Notion id from the environment (raw, dashed or URL), normalised; '' if optional+unset."""
+    value = _env(name, required)
+    return parse_page_id(value, name) if value else ""
+
+
+class _Recovery:
+    """What this run has created, so a failure part-way can say how to resume safely."""
+
+    def __init__(self) -> None:
+        self.attempted_create = False
+        self.env_lines: list[str] = []
+        self.orphan_profile_db: str | None = None
+
+    def report(self) -> None:
+        if not self.attempted_create:
+            return
+        lines = ["", "Setup stopped part-way. Before re-running:"]
+        for line in self.env_lines:
+            lines.append(f"  - {line}  <- add this to .env / GitHub Secrets before re-running")
+        if self.orphan_profile_db:
+            lines.append(
+                f"  - '{PROFILE_TITLE}' database {self.orphan_profile_db} was created without "
+                "its page: add a row to it manually (then set NOTION_PROFILE_PAGE_ID to that "
+                "row's id), or delete it in Notion and re-run"
+            )
+        lines.append(
+            "  - A create that timed out may still have succeeded: check the parent page for a "
+            "stray database and delete it before re-running."
+        )
+        print("\n".join(lines), file=sys.stderr)
+
+
 def _describe(changes: dict[str, Any]) -> str:
     return ", ".join(
         f"rename '{name}' -> '{spec['name']}'" if "name" in spec else f"add '{name}'"
@@ -105,9 +139,9 @@ def _describe(changes: dict[str, Any]) -> str:
 
 def _run(args: argparse.Namespace) -> None:
     token = _env("NOTION_TOKEN")
-    hackathons_db = _env("NOTION_HACKATHONS_DB_ID")
-    need_participations = not _env("NOTION_PARTICIPATIONS_DB_ID", required=False)
-    need_profile = not _env("NOTION_PROFILE_PAGE_ID", required=False)
+    hackathons_db = _env_id("NOTION_HACKATHONS_DB_ID")
+    need_participations = not _env_id("NOTION_PARTICIPATIONS_DB_ID", required=False)
+    need_profile = not _env_id("NOTION_PROFILE_PAGE_ID", required=False)
     parent = (args.parent_page or "").strip()
     # Check up front so a missing flag never leaves a half-finished setup behind.
     if (need_participations or need_profile) and not parent:
@@ -117,8 +151,27 @@ def _run(args: argparse.Namespace) -> None:
         )
     if need_participations or need_profile:
         parent = parse_page_id(parent)
-    prefix = "[dry run] would " if args.dry_run else ""
 
+    recovery = _Recovery()
+    try:
+        _apply(args, token, hackathons_db, parent, need_participations, need_profile, recovery)
+    except NotionError:
+        recovery.report()
+        raise
+    if args.dry_run:
+        print("Dry run: no changes were made.")
+
+
+def _apply(
+    args: argparse.Namespace,
+    token: str,
+    hackathons_db: str,
+    parent: str,
+    need_participations: bool,
+    need_profile: bool,
+    recovery: _Recovery,
+) -> None:
+    prefix = "[dry run] would " if args.dry_run else ""
     with make_client() as client:
         notion = NotionGateway(token, client)
         properties = notion.get_database(hackathons_db).get("properties")
@@ -137,7 +190,9 @@ def _run(args: argparse.Namespace) -> None:
                 print(f"{prefix}create database '{PARTICIPATIONS_TITLE}' under page {parent}")
             else:
                 schema = participation_schema(hackathons_db)
+                recovery.attempted_create = True
                 db = notion.create_database(parent, PARTICIPATIONS_TITLE, schema)
+                recovery.env_lines.append(f"NOTION_PARTICIPATIONS_DB_ID={db}")
                 print(f"NOTION_PARTICIPATIONS_DB_ID={db}")
 
         if need_profile:
@@ -146,16 +201,16 @@ def _run(args: argparse.Namespace) -> None:
                     f"{prefix}create database '{PROFILE_TITLE}' under page {parent} with one page"
                 )
             else:
+                recovery.attempted_create = True
                 db = notion.create_database(parent, PROFILE_TITLE, PROFILE_SCHEMA)
+                recovery.orphan_profile_db = db
                 print(f"Created '{PROFILE_TITLE}' database {db}")
                 page = notion.create_page(db, profile_to_properties(Profile()))
+                recovery.orphan_profile_db = None
                 print(
                     f"NOTION_PROFILE_PAGE_ID={page}  "
                     "(fill in its fields; write free-text notes in the page body)"
                 )
-
-    if args.dry_run:
-        print("Dry run: no changes were made.")
 
 
 def main(argv: list[str] | None = None) -> int:

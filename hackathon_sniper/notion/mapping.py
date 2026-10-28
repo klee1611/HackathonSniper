@@ -93,7 +93,13 @@ def participation_schema(hackathons_db_id: str) -> dict[str, dict[str, Any]]:
     outcomes = ("Submitted", "Finalist", "Winner", "Did not submit")
     return {
         "Project": {"title": {}},
-        "Hackathon": {"relation": {"database_id": hackathons_db_id, "single_property": {}}},
+        "Hackathon": {
+            "relation": {
+                "database_id": hackathons_db_id,
+                "type": "single_property",
+                "single_property": {},
+            }
+        },
         "Team": {"rich_text": {}},
         "Role": {"select": {}},
         "Tech Stack": {"multi_select": {}},
