@@ -64,8 +64,10 @@ class FakeGateway:
         self.token: str | None = None
         self.writes: list[tuple[str, tuple[Any, ...]]] = []
         self.client_closed = False
+        self.reads = 0
 
     def get_database(self, database_id: str) -> dict[str, Any]:
+        self.reads += 1
         if self.fail:
             raise NotionError("GET /databases/x -> 401: unauthorized")
         assert database_id == HACKATHONS_DB
@@ -154,15 +156,15 @@ def test_main_adds_missing_columns(run: Any, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_main_creates_participations_and_profile(run: Any) -> None:
-    code, out, gateway = run(COMPLETE, ["--parent-page", "parent-id"])
+    code, out, gateway = run(COMPLETE, ["--parent-page", RAW_ID])
     assert code == 0
     methods = [m for m, _ in gateway.writes]
     assert methods == ["create_database", "create_database", "create_page"]
     participations = gateway.writes[0][1]
-    assert participations[0] == "parent-id" and participations[1] == "My Participations"
+    assert participations[0] == RAW_ID and participations[1] == "My Participations"
     relation = participations[2]["Hackathon"]["relation"]
     assert relation["database_id"] == HACKATHONS_DB
-    assert gateway.writes[1][1][:2] == ("parent-id", "Hackathon Profile")
+    assert gateway.writes[1][1][:2] == (RAW_ID, "Hackathon Profile")
     assert "NOTION_PARTICIPATIONS_DB_ID=db-1" in out
     assert "NOTION_PROFILE_PAGE_ID=profile-page-id" in out
     assert TOKEN not in out
@@ -177,7 +179,7 @@ def test_main_missing_parent_page_errors_before_any_write(run: Any) -> None:
 
 
 def test_main_dry_run_makes_no_writes(run: Any) -> None:
-    code, out, gateway = run({"Title": {"type": "title"}}, ["--dry-run", "--parent-page", "p"])
+    code, out, gateway = run({"Title": {"type": "title"}}, ["--dry-run", "--parent-page", RAW_ID])
     assert code == 0
     assert gateway.writes == []
     assert "Solo" in out and "Title" in out
@@ -210,3 +212,53 @@ def test_main_missing_env_is_clean(run: Any, monkeypatch: pytest.MonkeyPatch, mi
     assert missing in out
     assert "Traceback" not in out and TOKEN not in out
     assert gateway.writes == []
+
+
+RAW_ID = "0123456789abcdef0123456789abcdef"
+DASHED_ID = "01234567-89ab-cdef-0123-456789abcdef"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        RAW_ID,
+        DASHED_ID,
+        f"https://www.notion.so/My-Page-{RAW_ID}",
+        f"https://www.notion.so/workspace/My-Page-{RAW_ID}?pvs=4",
+        f"  {RAW_ID.upper()}\n",
+    ],
+)
+def test_parse_page_id_accepts_ids_and_urls(value: str) -> None:
+    assert setup.parse_page_id(value) == RAW_ID
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["not-an-id", "", RAW_ID[:-1], RAW_ID + "0", "https://www.notion.so/My-Page", "../" + RAW_ID],
+)
+def test_parse_page_id_rejects_garbage(value: str) -> None:
+    with pytest.raises(SystemExit, match="parent-page"):
+        setup.parse_page_id(value)
+
+
+@pytest.mark.parametrize("value", [RAW_ID, DASHED_ID, f"https://www.notion.so/My-Page-{RAW_ID}"])
+def test_main_uses_normalized_parent_page(run: Any, value: str) -> None:
+    code, out, gateway = run(COMPLETE, ["--parent-page", value])
+    assert code == 0
+    assert [args[0] for m, args in gateway.writes if m == "create_database"] == [RAW_ID, RAW_ID]
+
+
+def test_main_invalid_parent_page_fails_before_any_call(run: Any) -> None:
+    code, out, gateway = run(V2, ["--parent-page", "not-an-id"])
+    assert code == 1
+    assert "--parent-page" in out
+    assert gateway.reads == 0 and gateway.writes == []
+    assert "Traceback" not in out and TOKEN not in out
+
+
+def test_main_parent_page_not_validated_when_not_needed(
+    run: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_existing_ids(monkeypatch)
+    code, out, gateway = run(COMPLETE, ["--parent-page", "not-an-id"])
+    assert code == 0 and "already up to date" in out

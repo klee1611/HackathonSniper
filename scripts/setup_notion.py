@@ -13,9 +13,11 @@ Usage: uv run python scripts/setup_notion.py [--parent-page <page_id>] [--dry-ru
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 # Run as a file (`python scripts/setup_notion.py`), sys.path holds scripts/, not the repo root
 # where the (uninstalled) hackathon_sniper package lives.
@@ -38,6 +40,25 @@ from hackathon_sniper.notion.mapping import (  # noqa: E402
 
 PARTICIPATIONS_TITLE = "My Participations"
 PROFILE_TITLE = "Hackathon Profile"
+# A Notion id: 32 hex digits, optionally in dashed 8-4-4-4-12 form, at the end of the value.
+_PAGE_ID = re.compile(
+    r"(?:^|[^0-9a-f])([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+)
+
+
+def parse_page_id(value: str) -> str:
+    """A raw/dashed Notion id or a pasted page URL, normalised to 32 lowercase hex digits."""
+    text = value.strip().lower()
+    if text.startswith(("http://", "https://")):
+        text = urlsplit(text).path.rstrip("/").rsplit("/", 1)[-1]
+    elif "/" in text:
+        text = ""
+    match = _PAGE_ID.search(text)
+    if not match or (match.start(1) > 0 and text[match.start(1) - 1] != "-"):
+        raise SystemExit(
+            "--parent-page must be a Notion page id (32 hex characters) or the page's URL."
+        )
+    return match.group(1).replace("-", "")
 
 
 def plan_column_changes(existing: dict[str, Any]) -> dict[str, Any]:
@@ -94,6 +115,8 @@ def _run(args: argparse.Namespace) -> None:
             "--parent-page is required to create the Participations DB / Profile "
             "(or set NOTION_PARTICIPATIONS_DB_ID and NOTION_PROFILE_PAGE_ID)."
         )
+    if need_participations or need_profile:
+        parent = parse_page_id(parent)
     prefix = "[dry run] would " if args.dry_run else ""
 
     with make_client() as client:
