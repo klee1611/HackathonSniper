@@ -20,11 +20,15 @@ SYSTEM = (
     "You plan web searches that discover upcoming hackathons for one developer. "
     "Write specific, diverse queries (themes, formats, regions, sponsors) that surface the pages "
     "of individual events, not news articles or listicles. Include the year. "
-    "Each query is a short search-engine query on one line."
+    "Each query is a short search-engine query on one line. "
+    "Devpost, MLH and Devfolio are already covered; target other sources such as company, "
+    "university, community or lu.ma event pages."
 )
 
 
 class QueryPlan(BaseModel):
+    """Web search queries to run."""
+
     queries: list[str] = Field(default_factory=list)
 
     @field_validator("queries", mode="before")

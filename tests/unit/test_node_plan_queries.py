@@ -168,3 +168,9 @@ def test_default_queries_dedupes_normalises_and_caps_topics() -> None:
 def test_default_queries_caps_long_interest() -> None:
     queries = default_queries(Profile(interests=["x" * 1000]), 2026)
     assert all(len(q) <= MAX_QUERY_CHARS for q in queries)
+
+
+def test_system_prompt_says_listing_sources_are_already_covered() -> None:
+    for source in ("Devpost", "MLH", "Devfolio"):
+        assert source in SYSTEM
+    assert "already covered" in SYSTEM
