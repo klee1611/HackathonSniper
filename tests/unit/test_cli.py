@@ -1,5 +1,7 @@
 import dataclasses
 import logging
+import os
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
 from typing import Any
@@ -39,6 +41,18 @@ def _no_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     monkeypatch.delenv("LOG_LEVEL", raising=False)
+
+
+_LOGGERS = (*cli.NOISY_LOGGERS, "httpx", "hackathon_sniper")
+
+
+@pytest.fixture(autouse=True)
+def _restore_logger_levels() -> Iterator[None]:
+    """main() sets per-logger levels; don't let them leak into other tests."""
+    saved = {name: logging.getLogger(name).level for name in _LOGGERS}
+    yield
+    for name, level in saved.items():
+        logging.getLogger(name).setLevel(level)
 
 
 def _set_env(monkeypatch: pytest.MonkeyPatch, **extra: str) -> None:
@@ -254,6 +268,63 @@ def test_summary_writer_appends_to_github_step_summary(
     summary = tmp_path / "summary.md"
     summary.write_text("before\n")
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    write = deps_module._summary_writer()
+    write = deps_module.summary_writer_from_env()
     write("# Report")
     assert summary.read_text() == "before\n# Report\n"
+
+
+def test_abort_log_and_summary_note_scrub_configured_secrets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    key = "gsk_abort_secret_key"
+    _set_env(monkeypatch, GROQ_API_KEY=key)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(cli, "build_deps", lambda settings, client: make_deps())
+
+    def boom(deps: Deps) -> Any:
+        raise RuntimeError(f"Error code: 401 - Authorization: Bearer {key}")
+
+    monkeypatch.setattr(cli, "run", boom)
+    with caplog.at_level(logging.INFO):
+        assert cli.main([]) == 1
+    assert "run aborted: RuntimeError: Error code: 401 - Authorization: Bearer REDACTED" in (
+        caplog.text
+    )
+    assert key not in caplog.text
+    assert key not in summary.read_text()
+
+
+def test_debug_log_level_caps_sdk_loggers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    monkeypatch.setattr(cli, "build_deps", lambda *a: pytest.fail("must not build deps"))
+    assert cli.main([]) == 2  # logging is configured before settings load
+    for name in cli.NOISY_LOGGERS:
+        assert logging.getLogger(name).getEffectiveLevel() >= logging.INFO, name
+    assert logging.getLogger("groq").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.INFO
+    assert logging.getLogger("hackathon_sniper").getEffectiveLevel() == logging.DEBUG
+
+
+def test_default_log_level_keeps_sdk_loggers_at_info() -> None:
+    assert cli.main([]) == 2
+    for name in (*cli.NOISY_LOGGERS, "httpx", "hackathon_sniper"):
+        assert logging.getLogger(name).getEffectiveLevel() == logging.INFO, name
+
+
+@pytest.mark.parametrize("kind", ["unreadable", "non-utf8"])
+def test_unreadable_dotenv_exits_2_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    # (A directory named .env is silently skipped by pydantic-settings, so it can't fail.)
+    dotenv = tmp_path / ".env"
+    dotenv.write_bytes(b"GROQ_API_KEY=gsk_\xff\xfe_secret\n")
+    if kind == "unreadable":
+        if os.geteuid() == 0:
+            pytest.skip("root can read a mode-000 file")
+        dotenv.chmod(0)
+    assert cli.main([]) == 2
+    captured = capsys.readouterr()
+    text = captured.err + captured.out
+    assert "Configuration error: could not load settings" in text
+    assert "Traceback" not in text and "secret" not in text

@@ -46,7 +46,7 @@ class Deps:
     summary_writer: Callable[[str], None] = print
 
 
-def _summary_writer() -> Callable[[str], None]:
+def summary_writer_from_env() -> Callable[[str], None]:
     """Write to the GitHub Actions job summary when running in Actions, else stdout."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
@@ -75,5 +75,5 @@ def build_deps(settings: Settings, client: httpx.Client) -> Deps:
         notion=NotionGateway(settings.notion_token, client),
         fetcher=PageFetcher(client),
         today=datetime.now(UTC).date(),
-        summary_writer=_summary_writer(),
+        summary_writer=summary_writer_from_env(),
     )

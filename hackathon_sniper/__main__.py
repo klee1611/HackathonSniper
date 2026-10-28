@@ -5,9 +5,10 @@ import sys
 from typing import Any
 
 from pydantic import ValidationError
+from pydantic_settings import SettingsError
 
 from hackathon_sniper.config import Settings
-from hackathon_sniper.deps import _summary_writer, build_deps
+from hackathon_sniper.deps import build_deps, summary_writer_from_env
 from hackathon_sniper.graph import run
 from hackathon_sniper.http import make_client
 from hackathon_sniper.nodes.report import exit_code
@@ -17,6 +18,17 @@ logger = logging.getLogger("hackathon_sniper")
 EXIT_FAILED = 1
 EXIT_CONFIG = 2
 _MAX_ERROR_CHARS = 300
+# Third-party loggers that log request/response bodies (full LLM prompts, which carry profile
+# data and untrusted page text) at DEBUG. Never below INFO; at DEBUG they're held at WARNING.
+NOISY_LOGGERS = (
+    "groq",
+    "openai",
+    "httpcore",
+    "langchain",
+    "langchain_core",
+    "langgraph",
+    "urllib3",
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -35,6 +47,12 @@ def _configure_logging() -> None:
     name = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
     level = logging.getLevelNamesMapping().get(name, logging.INFO)
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("hackathon_sniper").setLevel(level)
+    # httpx request lines (key params redacted by search.py) stay visible at DEBUG.
+    logging.getLogger("httpx").setLevel(max(level, logging.INFO))
+    noisy = logging.WARNING if level <= logging.DEBUG else max(level, logging.INFO)
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(noisy)
 
 
 def _config_error(e: ValidationError) -> str:
@@ -46,8 +64,9 @@ def _config_error(e: ValidationError) -> str:
     return "\n".join(lines)
 
 
-def _describe(e: BaseException) -> str:
-    message = " ".join(str(e).split())[:_MAX_ERROR_CHARS]
+def _describe(e: BaseException, settings: Settings | None = None) -> str:
+    message = str(e) if settings is None else settings.scrub(str(e))
+    message = " ".join(message.split())[:_MAX_ERROR_CHARS]
     return f"{type(e).__name__}: {message}" if message else type(e).__name__
 
 
@@ -56,7 +75,7 @@ def _note_failure(markdown: str) -> None:
     if not os.environ.get("GITHUB_STEP_SUMMARY"):
         return
     try:
-        _summary_writer()(markdown)
+        summary_writer_from_env()(markdown)
     except OSError as e:
         logger.warning("could not write job summary: %s", _describe(e))
 
@@ -76,16 +95,27 @@ def main(argv: list[str] | None = None) -> int:
         print(_config_error(e), file=sys.stderr)
         _note_failure("## HackathonSniper: configuration error\n\nSee the job log for details.")
         return EXIT_CONFIG
+    except (SettingsError, OSError, UnicodeDecodeError) as e:
+        # e.g. an unreadable or non-UTF-8 .env; the message may quote file contents, so omit it.
+        print(
+            f"Configuration error: could not load settings ({type(e).__name__}); "
+            "check that .env is a readable UTF-8 file.",
+            file=sys.stderr,
+        )
+        _note_failure("## HackathonSniper: configuration error\n\nSee the job log for details.")
+        return EXIT_CONFIG
 
     try:
         with make_client() as client:
             deps = build_deps(settings, client)
             return exit_code(run(deps), deps)
     except Exception as e:  # unattended run: a concise line, never a traceback with request data
-        logger.error("run aborted: %s", _describe(e))
+        logger.error("run aborted: %s", _describe(e, settings))
         _note_failure(
-            f"## HackathonSniper: run aborted\n\n`{type(e).__name__}` before the report was "
-            "written. See the job log for details."
+            settings.scrub(
+                f"## HackathonSniper: run aborted\n\n`{type(e).__name__}` before the report "
+                "was written. See the job log for details."
+            )
         )
         return EXIT_FAILED
 

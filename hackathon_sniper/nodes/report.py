@@ -64,13 +64,24 @@ def _event_cell(name: str, url: str) -> str:
 
 def render_report(state: GraphState, deps: Deps) -> str:
     """Bare http(s), www. and email text in reasons/errors may still be GFM-autolinked;
-    accepted, since such links can't execute script."""
+    accepted, since such links can't execute script.
+
+    Configured secrets are scrubbed from every interpolated value before escaping (an SDK
+    error echoing an API key must not reach the public job summary)."""
+    scrub = deps.settings.scrub
+
+    def md(text: str, limit: int) -> str:
+        return _md(scrub(text), limit)
+
+    def cell(name: str, url: str) -> str:
+        return _event_cell(scrub(name), scrub(url))
+
     sync = state.get("sync_result") or SyncResult()
     by_source = Counter(src for ev in state.get("candidates", []) for src in ev.sources)
     ranked = state.get("ranked", [])
     unscored = sum(1 for e in ranked if e.fit_score is None and not e.is_expired(deps.today))
     mode = "dry run (no Notion writes)" if deps.settings.dry_run else "live"
-    sources = ", ".join(f"{_md(k, 50)}={v}" for k, v in sorted(by_source.items()))
+    sources = ", ".join(f"{md(k, 50)}={v}" for k, v in sorted(by_source.items()))
     lines = [
         f"## HackathonSniper run — {deps.today.isoformat()}",
         "",
@@ -87,14 +98,14 @@ def render_report(state: GraphState, deps: Deps) -> str:
     if top:
         lines += ["", "### Top matches", "", "| Score | Event | Why |", "|---|---|---|"]
         lines += [
-            f"| {e.fit_score} | {_event_cell(e.name, e.canonical_url)} "
-            f"| {_md(e.fit_reason or '', MAX_REASON_CHARS)} |"
+            f"| {e.fit_score} | {cell(e.name, e.canonical_url)} "
+            f"| {md(e.fit_reason or '', MAX_REASON_CHARS)} |"
             for e in top
         ]
     errors = state.get("errors", [])
     if errors:
         lines += ["", "### Problems", ""]
-        lines += [f"- {_md(err, MAX_ERROR_CHARS)}" for err in errors[:MAX_ERRORS_LISTED]]
+        lines += [f"- {md(err, MAX_ERROR_CHARS)}" for err in errors[:MAX_ERRORS_LISTED]]
         if len(errors) > MAX_ERRORS_LISTED:
             lines.append(f"- … and {len(errors) - MAX_ERRORS_LISTED} more")
     return "\n".join(lines)

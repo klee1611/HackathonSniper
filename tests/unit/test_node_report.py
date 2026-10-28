@@ -162,3 +162,18 @@ def test_exit_code_fails_on_many_sync_errors_or_half_the_sources_down() -> None:
 def test_exit_code_sync_failure_thresholds(sync: SyncResult, expected: int) -> None:
     deps = make_deps(sources={"devpost": lambda: [], "mlh": lambda: []})
     assert exit_code({"sync_result": sync}, deps) == expected
+
+
+def test_report_scrubs_configured_secrets_before_escaping() -> None:
+    key = "gsk_planted_secret_key"
+    deps = make_deps(groq_api_key=key, notion_token="ntn_planted_token")
+    ev = event(name=f"leak {key}", fit_score=80, fit_reason="ntn_planted_token")
+    state: GraphState = {
+        "ranked": [ev],
+        "errors": [f"plan_queries fell back: Error code: 401 - Bearer {key}"],
+    }
+    md = render_report(state, deps)
+    assert "Bearer REDACTED" in md
+    assert "leak REDACTED" in md
+    assert key not in md and "gsk\\_planted" not in md
+    assert "ntn_planted_token" not in md and "ntn\\_planted" not in md

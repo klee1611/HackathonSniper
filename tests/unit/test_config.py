@@ -84,3 +84,24 @@ def test_rank_budget_reserve_default_and_bounds() -> None:
     assert make_settings().rank_budget_reserve == 8
     with pytest.raises(ValidationError):
         make_settings(rank_budget_reserve=-1)
+
+
+def test_scrub_replaces_every_configured_secret() -> None:
+    s = make_settings(
+        groq_api_key="gsk_groq_secret_1",
+        notion_token="ntn_notion_secret",
+        search_provider="serpapi",
+        brave_api_key="brave-secret-123",
+        serpapi_api_key="serp-secret-456",
+    )
+    text = (
+        "a gsk_groq_secret_1 b ntn_notion_secret c brave-secret-123 d serp-secret-456 "
+        "gsk_groq_secret_1"
+    )
+    assert s.scrub(text) == "a REDACTED b REDACTED c REDACTED d REDACTED REDACTED"
+
+
+def test_scrub_skips_short_and_missing_secrets() -> None:
+    s = make_settings(groq_api_key="short", notion_token="1234567", brave_api_key="b")
+    assert s.serpapi_api_key is None
+    assert s.scrub("short 1234567 b test") == "short 1234567 b test"

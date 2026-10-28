@@ -3,6 +3,10 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+REDACTED = "REDACTED"
+SECRET_FIELDS = ("groq_api_key", "notion_token", "brave_api_key", "serpapi_api_key")
+MIN_SECRET_CHARS = 8  # shorter values are too likely to match ordinary text
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -45,3 +49,11 @@ class Settings(BaseSettings):
                 f"{provider.upper()}_API_KEY is required when SEARCH_PROVIDER={provider}"
             )
         return self
+
+    def scrub(self, text: str) -> str:
+        """Last-line defence: replace every configured secret in `text` with REDACTED."""
+        values = (getattr(self, name) for name in SECRET_FIELDS)
+        secrets = sorted({v for v in values if v and len(v) >= MIN_SECRET_CHARS}, key=len)
+        for secret in reversed(secrets):  # longest first, in case one contains another
+            text = text.replace(secret, REDACTED)
+        return text
