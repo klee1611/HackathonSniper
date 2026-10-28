@@ -1,10 +1,12 @@
+import unicodedata
 from datetime import date
 from typing import Any
 
 import httpx
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from hackathon_sniper.llm.base import BudgetExceeded, LLMBudget, LLMError
-from hackathon_sniper.models import Origin
+from hackathon_sniper.models import Format, Origin, Solo
 from hackathon_sniper.nodes.web_search import (
     BATCH,
     MAX_NAME_CHARS,
@@ -15,6 +17,7 @@ from hackathon_sniper.nodes.web_search import (
     SYSTEM,
     ExtractedEvent,
     Extraction,
+    _one_line,
     web_search,
 )
 from hackathon_sniper.search import SearchResult
@@ -275,3 +278,71 @@ def test_blank_name_or_unconvertible_event_is_skipped_not_fatal(monkeypatch: Any
     monkeypatch.setattr(ws, "HackathonEvent", picky)
     out = web_search({"queries": ["q"]}, make_deps(llm=llm, search=search, results_per_query=3))
     assert [e.canonical_url for e in out["candidates"]] == ["https://h2.dev"]
+
+
+# --- tool schema / robustness follow-ups ------------------------------------------------
+
+
+def _strict_keywords(node: Any, path: str = "$") -> list[str]:
+    """Paths of every `enum` key and every string-valued `format` keyword (e.g. date)."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "enum" or (key == "format" and isinstance(value, str)):
+                found.append(f"{path}.{key}")
+            found += _strict_keywords(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            found += _strict_keywords(value, f"{path}[{i}]")
+    return found
+
+
+def test_tool_schema_is_loose_so_provider_side_validation_cannot_reject_values() -> None:
+    tool = convert_to_openai_tool(Extraction)
+    assert _strict_keywords(tool) == []
+    fields = tool["function"]["parameters"]["properties"]["events"]["items"]["properties"]
+    assert "string" in fields["format"]["type"] and "null" in fields["format"]["type"]
+    assert "string" in fields["start_date"]["type"]
+    assert set(fields["prize_usd"]["type"]) == {"integer", "string", "null"}
+
+
+def test_lenient_parsing_through_extraction_model_validate() -> None:
+    raw = {
+        "events": [
+            {
+                "is_hackathon": True,
+                "name": "x",
+                "url": "https://x.dev",
+                "registration_deadline": "2026-11-01",
+                "start_date": "TBD",
+                "end_date": None,
+                "prize_usd": "$10,000",
+                "format": "online",
+                "solo_allowed": "true",
+            }
+        ]
+    }
+    (x,) = Extraction.model_validate(raw).events
+    assert (x.registration_deadline, x.start_date, x.end_date) == (date(2026, 11, 1), None, None)
+    assert (x.prize_usd, x.format, x.solo_allowed) == (10000, Format.ONLINE, Solo.YES)
+
+
+def test_one_line_strips_control_and_bidi_characters() -> None:
+    assert _one_line("Hack\u202e\x00 Day", 100) == "Hack Day"
+    cleaned = _one_line("a\u200fb\u2066c\x07d\ufeff e\tf", 100)
+    assert not any(unicodedata.category(c).startswith("C") for c in cleaned)
+
+
+def test_null_name_or_url_drops_only_that_item() -> None:
+    raw = {
+        "events": [
+            {"is_hackathon": True, "name": None, "url": "https://bighack.dev"},
+            {"is_hackathon": True, "name": "No URL", "url": None},
+            {"is_hackathon": True, "name": "Big Hack", "url": "https://bighack.dev"},
+        ]
+    }
+    llm = FakeLLM({Extraction: lambda u: Extraction.model_validate(raw)})
+    out = web_search({"queries": ["q"]}, make_deps(llm=llm, search=FakeSearch({"q": [RESULT]})))
+    assert [(e.name, e.canonical_url) for e in out["candidates"]] == [
+        ("Big Hack", "https://bighack.dev")
+    ]

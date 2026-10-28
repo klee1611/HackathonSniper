@@ -1,5 +1,6 @@
 import logging
 import re
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -48,8 +49,9 @@ SYSTEM = (
 
 class ExtractedEvent(BaseModel):
     is_hackathon: bool
-    name: str
-    url: str
+    # Nullable so one null item can't fail the whole batch; such items are dropped later.
+    name: str | None = None
+    url: str | None = None
     registration_deadline: LenientDate = None
     start_date: LenientDate = None
     end_date: LenientDate = None
@@ -69,6 +71,9 @@ class Extraction(BaseModel):
 
 
 def _one_line(text: str, limit: int) -> str:
+    # Drop control/format/bidi characters (category C*: NUL, RLO, zero-width, ...) first;
+    # whitespace controls (\n, \t, \r) are kept so the split below turns them into spaces.
+    text = "".join(c for c in text if c.isspace() or not unicodedata.category(c).startswith("C"))
     text = " ".join(text.split())
     return text if len(text) <= limit else text[:limit].rstrip()
 
@@ -90,7 +95,7 @@ def _format_batch(batch: list[tuple[str, SearchResult]]) -> str:
 
 
 def _to_event(x: ExtractedEvent, url: str) -> HackathonEvent | None:
-    name = _one_line(x.name, MAX_NAME_CHARS)
+    name = _one_line(x.name or "", MAX_NAME_CHARS)
     if not name:
         return None
     themes = [t for t in (_one_line(t, MAX_THEME_CHARS) for t in x.themes) if t][:MAX_THEMES]

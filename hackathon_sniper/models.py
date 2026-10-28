@@ -5,7 +5,7 @@ from datetime import date, datetime
 from enum import Enum, IntEnum, StrEnum
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, Field, WithJsonSchema, field_validator
 
 from hackathon_sniper.dates import parse_date
 from hackathon_sniper.urls import canonicalize
@@ -141,10 +141,31 @@ _SOLO_ALIASES = {
     "n": Solo.NO,
 }
 
-LenientFormat = Annotated[Format, _lenient_enum(Format, Format.UNKNOWN, _FORMAT_ALIASES)]
-LenientSolo = Annotated[Solo, _lenient_enum(Solo, Solo.UNKNOWN, _SOLO_ALIASES)]
-LenientDate = Annotated[date | None, BeforeValidator(_iso_date_or_none)]
-LenientInt = Annotated[int | None, BeforeValidator(_int_or_none)]
+# The advertised JSON schema is deliberately loose (no enum / format / integer-only). Groq
+# validates tool arguments against it server-side, so a strict schema would reject values
+# like "online" or "$10,000" before the lenient BeforeValidators above ever see them.
+LenientFormat = Annotated[
+    Format,
+    _lenient_enum(Format, Format.UNKNOWN, _FORMAT_ALIASES),
+    WithJsonSchema(
+        {"type": ["string", "null"], "description": "Online, In-person, Hybrid or Unknown"}
+    ),
+]
+LenientSolo = Annotated[
+    Solo,
+    _lenient_enum(Solo, Solo.UNKNOWN, _SOLO_ALIASES),
+    WithJsonSchema({"type": ["string", "null"], "description": "Yes, No or Unknown"}),
+]
+LenientDate = Annotated[
+    date | None,
+    BeforeValidator(_iso_date_or_none),
+    WithJsonSchema({"type": ["string", "null"], "description": "YYYY-MM-DD or null"}),
+]
+LenientInt = Annotated[
+    int | None,
+    BeforeValidator(_int_or_none),
+    WithJsonSchema({"type": ["integer", "string", "null"]}),
+]
 
 
 class HackathonEvent(BaseModel):
