@@ -408,3 +408,92 @@ def test_date_range_drops_end_not_after_start() -> None:
         end_date=date(2026, 11, 1),
     )
     assert event_to_properties(ev)["Event Dates"] == {"date": {"start": "2026-11-05", "end": None}}
+
+
+# ---- review fixes: stable round-trip, nameless rows, strict text numbers ---------------------
+
+
+def _rewrite(ev: HackathonEvent) -> dict[str, Any]:
+    back = page_to_event({"id": "p", "properties": event_to_properties(ev)})
+    assert back is not None
+    return event_to_properties(back)
+
+
+def test_padded_strings_round_trip_without_churn() -> None:
+    ev = HackathonEvent(
+        canonical_url="https://a.dev",
+        name="  A  ",
+        location=" Taipei ",
+        description="\n Desc \n",
+        fit_reason=" ok ",
+    )
+    props = event_to_properties(ev)
+    assert props["Name"]["title"][0]["text"]["content"] == "A"
+    assert _rewrite(ev) == props
+
+
+def test_whitespace_only_text_writes_nothing() -> None:
+    ev = HackathonEvent(canonical_url="https://a.dev", name="A", location="   ")
+    assert event_to_properties(ev)["Location"] == {"rich_text": []}
+
+
+def test_negative_numbers_are_written_as_none_and_round_trip() -> None:
+    ev = HackathonEvent(canonical_url="https://a.dev", name="A", prize_usd=-5, fit_score=-1)
+    props = event_to_properties(ev)
+    assert (props["Prize USD"], props["Fit Score"]) == ({"number": None}, {"number": None})
+    assert _rewrite(ev) == props
+
+
+@pytest.mark.parametrize("name_prop", [None, {"title": []}, {"title": [{"plain_text": "   "}]}])
+def test_nameless_row_with_valid_url_is_kept_and_named_by_host(
+    name_prop: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    page = _page(Name=name_prop, URL={"url": "https://www.Big-Hack.devpost.com/x?utm_source=a"})
+    with caplog.at_level(logging.WARNING, logger="hackathon_sniper.notion.mapping"):
+        ev = page_to_event(page)
+    assert ev is not None
+    assert (ev.name, ev.canonical_url, ev.notion_page_id) == (
+        "big-hack.devpost.com",
+        "https://big-hack.devpost.com/x",
+        "pg-1",
+    )
+    assert "pg-1" in caplog.text
+
+
+def test_nameless_row_without_usable_url_is_still_skipped() -> None:
+    assert page_to_event(_page(Name=None, URL={"url": "not a url"})) is None
+    assert page_to_event(_page(Name=None, URL=None)) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("$1,500", 1500),
+        (" $ 2000 ", 2000),
+        ("1500.0", 1500),
+        ("1,5", 15),  # the regex treats commas as thousands separators
+        ("1.500", 2),  # 1.5, rounded half-to-even
+        ("1e3", None),
+        ("inf", None),
+        ("-5", None),
+        ("USD 500", None),
+        ("500 USD", None),
+        ("$", None),
+    ],
+)
+def test_numbers_typed_as_text_parse_strictly(text: str, expected: int | None) -> None:
+    ev = page_to_event(_page(**{"Prize USD": {"rich_text": [{"plain_text": text}]}}))
+    assert ev is not None and ev.prize_usd == expected
+
+
+def test_catch_all_warning_includes_traceback(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def boom(_: Any) -> Any:
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr("hackathon_sniper.notion.mapping._read_multi", boom)
+    with caplog.at_level(logging.WARNING, logger="hackathon_sniper.notion.mapping"):
+        assert page_to_event(_page()) is None
+    [record] = [r for r in caplog.records if "kaboom" in r.getMessage()]
+    assert record.exc_info is not None

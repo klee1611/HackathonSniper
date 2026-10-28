@@ -30,10 +30,12 @@ from hackathon_sniper.models import (
     Verification,
 )
 from hackathon_sniper.notion.client import _plain_text
+from hackathon_sniper.urls import try_canonicalize
 
 logger = logging.getLogger(__name__)
 
 # canonicalize() only rejects an empty host, so "not a url" would become "https://not a url".
+_TEXT_NUMBER = re.compile(r"\s*\$?\s*(\d[\d,]*(?:\.\d+)?)\s*")
 _HOST = re.compile(r"[^\s/:.]+(\.[^\s/:.]+)+(:\d+)?")
 
 NAME = "Name"
@@ -121,7 +123,14 @@ def _clip(value: str, limit: int) -> str:
 
 
 def _text(value: str | None) -> list[dict[str, Any]]:
-    return [{"type": "text", "text": {"content": _clip(value, _MAX_TEXT)}}] if value else []
+    # Strip like the reader does, or every padded value would differ on re-read and churn.
+    content = _clip((value or "").strip(), _MAX_TEXT).strip()
+    return [{"type": "text", "text": {"content": content}}] if content else []
+
+
+def _number(value: int | None) -> dict[str, Any]:
+    # The reader treats negatives as unknown; write them that way so round-trips are stable.
+    return {"number": value if value is not None and value >= 0 else None}
 
 
 def _date(start: date | None, end: date | None = None) -> dict[str, Any]:
@@ -156,13 +165,13 @@ def event_to_properties(ev: HackathonEvent) -> dict[str, Any]:
         SOURCES: _multi(ev.sources),
         DEADLINE: _date(ev.registration_deadline),
         DATES: _date(ev.start_date or ev.end_date, ev.end_date),
-        PRIZE: {"number": ev.prize_usd},
+        PRIZE: _number(ev.prize_usd),
         FORMAT: _select(ev.format.value),
         LOCATION: {"rich_text": _text(ev.location)},
         SOLO: _select(ev.solo_allowed.value),
         THEMES: _multi(ev.themes),
         DESCRIPTION: {"rich_text": _text(ev.description)},
-        FIT: {"number": ev.fit_score},
+        FIT: _number(ev.fit_score),
         REASON: {"rich_text": _text(ev.fit_reason)},
         VERIFICATION: _select(ev.verification.value),
         VERIFIED_AT: _date(ev.verified_at),
@@ -255,11 +264,10 @@ def _read_multi(prop: dict[str, Any]) -> list[str]:
 def _read_int(prop: dict[str, Any]) -> int | None:
     number = prop.get("number")
     if number is None and "number" not in prop:
-        text = _read_text(prop).replace(",", "").replace("$", "").strip()
-        try:
-            number = float(text) if text else None
-        except ValueError:
+        match = _TEXT_NUMBER.fullmatch(_read_text(prop))
+        if not match:
             return None
+        number = float(match.group(1).replace(",", ""))
     if isinstance(number, bool) or not isinstance(number, int | float):
         return None
     if not math.isfinite(number) or number < 0:
@@ -280,23 +288,29 @@ def page_to_event(page: dict[str, Any]) -> HackathonEvent | None:
     try:
         return _page_to_event(page)
     except Exception as exc:  # one odd hand-edited row must never crash the run
-        logger.warning("Skipping Notion page %s: %s", page_id, exc)
+        logger.warning("Skipping Notion page %s: %s", page_id, exc, exc_info=True)
         return None
 
 
 def _page_to_event(page: dict[str, Any]) -> HackathonEvent | None:
+    page_id = page.get("id")
     url = _read_text(_prop(page, URL))
-    name = _read_text(_prop(page, NAME))
-    if not url or not name:
-        logger.warning("Skipping Notion page %s: missing name or URL", page.get("id"))
+    canonical = try_canonicalize(url)
+    host = urlsplit(canonical).netloc if canonical else ""
+    if not _HOST.fullmatch(host):
+        logger.warning("Skipping Notion page %s: missing or implausible URL %r", page_id, url)
         return None
+    name = _read_text(_prop(page, NAME))
+    if not name:
+        # Keep the row: dropping it would hide its URL from sync, which would then duplicate it.
+        logger.warning("Notion page %s has no name; using %r", page_id, host)
+        name = host
     verification = _enum(
         Verification, _read_select(_prop(page, VERIFICATION)), Verification.UNVERIFIED
     )
     dates = _prop(page, DATES)
-    page_id = page.get("id")
-    event = HackathonEvent(
-        canonical_url=url,
+    return HackathonEvent(
+        canonical_url=canonical,
         name=name,
         sources=_read_multi(_prop(page, SOURCES)),
         registration_deadline=_read_date(_prop(page, DEADLINE)),
@@ -317,10 +331,6 @@ def _page_to_event(page: dict[str, Any]) -> HackathonEvent | None:
         lifecycle=_enum(Lifecycle, _read_select(_prop(page, LIFECYCLE)), Lifecycle.ACTIVE),
         notion_page_id=str(page_id) if page_id else None,
     )
-    if not _HOST.fullmatch(urlsplit(event.canonical_url).netloc):
-        logger.warning("Skipping Notion page %s: implausible URL %r", page_id, url)
-        return None
-    return event
 
 
 def page_to_profile(page: dict[str, Any], body: str) -> Profile:
