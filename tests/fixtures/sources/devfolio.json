@@ -1,0 +1,384 @@
+{
+ "hits": {
+  "total": {
+   "value": 12
+  },
+  "hits": [
+   {
+    "_source": {
+     "country": "India",
+     "devfolio_official": null,
+     "featured": null,
+     "private": false,
+     "starts_at": "2026-11-01T00:30:00+00:00",
+     "hosted_by": null,
+     "hashtags": [],
+     "apply_mode": "both",
+     "city": "Surat",
+     "timezone": "Asia/Calcutta",
+     "rating": 0,
+     "type": "HACKATHON",
+     "uuid": "0ad8f867250d46bd987623adb920028f",
+     "sponsor_tiers": [],
+     "themes": [
+      {
+       "name": "AI",
+       "verified": true,
+       "uuid": "9d287d0c0870485a838efa02d5ecc06b"
+      }
+     ],
+     "hackathon_setting": {
+      "winner_announce_at": null,
+      "reg_starts_at": "2026-10-21T23:30:00+00:00",
+      "winner_announced": false,
+      "women_only": false,
+      "reg_ends_at": "2026-10-28T18:30:00+00:00",
+      "facebook": null,
+      "telegram": null,
+      "medium": null,
+      "instagram": null,
+      "linkedin": null,
+      "external_apply_url": null,
+      "primary_color": "#2563eb",
+      "uuid": "61e0edad573f49c4ab90213264bf9be9",
+      "twitter": null,
+      "site": null,
+      "discord": null,
+      "review": false,
+      "slack": null,
+      "logo": "https://assets.devfolio.co/hackathons/0ad8f867250d46bd987623adb920028f/assets/logo/244.png",
+      "subdomain": "surat-hack-2026",
+      "farcaster": null
+     },
+     "ends_at": "2026-11-01T18:30:00+00:00",
+     "is_online": false,
+     "state": "Gujarat",
+     "slug": "surat-hack-2026",
+     "team_min": 1,
+     "themed": false,
+     "discover": false,
+     "participants_count": 60,
+     "hackathon_faqs": [],
+     "team_size": 4,
+     "verified": true,
+     "prizes": [
+      {
+       "parent_prize_uuid": null,
+       "name": "First Place",
+       "is_sponsor_prize": false,
+       "uuid": "7dc8e4e10a6d42d9905aee947c187c76",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Second Place",
+       "is_sponsor_prize": false,
+       "uuid": "f37231bfee67418c9a841202e37a17ad",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Third Place",
+       "is_sponsor_prize": false,
+       "uuid": "79a56f8b0c6c4713ac9cb07de4a8571c",
+       "desc": ""
+      }
+     ],
+     "projects_submitted": 0,
+     "name": "Surat Hack 2026",
+     "tagline": "Build AI Agents. Solve Real Problems. Create What's Next.",
+     "location": "India Accelerator | IA Spaces - Coworking Space, Udhana - Magdalla Road, Piplod, Surat, Gujarat, India",
+     "cover_img": "https://assets.devfolio.co/hackathons/0ad8f867250d46bd987623adb920028f/assets/cover/666.png",
+     "desc": "# Welcome to Surat Hack 2026 🚀\n\n**100+ Builders. One City. Endless Possibilities.**\n\nSurat Hack 2026 is an AI-focused hackathon bringing together talented developers, students, entrepreneurs, and technology enthusiasts to build innovative solutions to real-world problems.\n\nWhether you're an experienced developer, an AI enthusiast, or a student looking to turn your ideas into reality, this is your opportunity to collaborate, experiment, and build something meaningful.\n\n## The Challenge\n\n**Build an AI-powered application or agent that solves a real problem.**\n\nFrom intelligent personal assistants and business automation to productivity tools and entirely new AI-native products, the possibilities are open.\n\nWe encourage participants to think creatively, experiment with emerging technologies, and develop working prototypes that demonstrate real-world value.\n\n## What to Expect\n\n- **18–24 hours of building:** Turn an idea into a working prototype.\n- **100+ aspiring participants:** Connect with developers, students, and innovators from Surat and beyond.\n- **Hands-on innovation:** Work with modern AI tools, APIs, and development frameworks.\n- **Collaboration:** Build alongside talented people, exchange ideas, and learn from one another.\n- **Project demonstrations:** Present your solution to a panel of industry professionals and experienced builders.\n- **Networking:** Meet like-minded developers, entrepreneurs, and members of the local technology ecosystem.\n\n## Who Can Participate?\n\nStudents, software developers, AI enthusiasts, working professionals, and aspiring founders are welcome.\n\nYou don't need to have founded a startup or built an AI product before. Bring your skills, curiosity, and willingness to create.\n\n## Our Mission\n\nSurat has an incredible community of ambitious students, developers, and entrepreneurs.\n\nOur goal is to bring that community together, encourage practical AI innovation, and create opportunities for talented builders to showcase what they're capable of.\n\n**Come with an idea. Leave with something you've built.**\n\nJoin us at Surat Hack 2026!",
+     "status": "publish",
+     "user_hackathon": null,
+     "user_hackathon_reminder": null
+    }
+   },
+   {
+    "_source": {
+     "country": "United Kingdom",
+     "devfolio_official": null,
+     "featured": null,
+     "private": false,
+     "starts_at": "2026-11-07T09:00:00+00:00",
+     "hosted_by": null,
+     "hashtags": [],
+     "apply_mode": "both",
+     "city": null,
+     "timezone": "Europe/London",
+     "rating": 0,
+     "type": "HACKATHON",
+     "uuid": "4c311506be0e4a6e9299199c09efe290",
+     "sponsor_tiers": [],
+     "themes": [],
+     "hackathon_setting": {
+      "winner_announce_at": null,
+      "reg_starts_at": "2026-10-16T19:00:00+00:00",
+      "winner_announced": false,
+      "women_only": false,
+      "reg_ends_at": "2026-10-29T00:00:00+00:00",
+      "facebook": null,
+      "telegram": null,
+      "medium": null,
+      "instagram": null,
+      "linkedin": null,
+      "external_apply_url": null,
+      "primary_color": "#9900ef",
+      "uuid": "31b689991dc943b980fa22a2f9cd7367",
+      "twitter": null,
+      "site": "https://agentverse.uclai.co.uk",
+      "discord": null,
+      "review": false,
+      "slack": null,
+      "logo": "https://assets.devfolio.co/hackathons/4c311506be0e4a6e9299199c09efe290/assets/logo/630.png",
+      "subdomain": "agentverse",
+      "farcaster": null
+     },
+     "ends_at": "2026-11-08T13:00:00+00:00",
+     "is_online": false,
+     "state": "England",
+     "slug": "agentverse",
+     "team_min": 2,
+     "themed": false,
+     "discover": false,
+     "participants_count": 109,
+     "hackathon_faqs": [],
+     "team_size": 4,
+     "verified": true,
+     "prizes": [],
+     "projects_submitted": 0,
+     "name": "AgentVerse",
+     "tagline": "UCL's Premier AI Hackathon",
+     "location": "UCL East - Marshgate, Sidings Street, London, UK",
+     "cover_img": "https://assets.devfolio.co/hackathons/4c311506be0e4a6e9299199c09efe290/assets/cover/39.png",
+     "desc": "Welcome to AgentVerse, UCL's premier AI-centric  Hackathon",
+     "status": "publish",
+     "user_hackathon": null,
+     "user_hackathon_reminder": null
+    }
+   },
+   {
+    "_source": {
+     "country": "Germany",
+     "devfolio_official": null,
+     "featured": null,
+     "private": false,
+     "starts_at": "2026-10-30T08:00:00+00:00",
+     "hosted_by": null,
+     "hashtags": [],
+     "apply_mode": "both",
+     "city": "München",
+     "timezone": "Europe/Berlin",
+     "rating": 0,
+     "type": "HACKATHON",
+     "uuid": "528f2495b98b4f38ae41139390594a3a",
+     "sponsor_tiers": [
+      {
+       "sponsors": [
+        {
+         "name": "BSV Association",
+         "about": "[BSV Association](https://bsvassociation.org/) is a Switzerland-based non-profit and the global advocate for the **BSV blockchain**. Together with developers, academic partners and the wider ecosystem, it educates communities, drives innovation and works to keep the BSV protocol stable and secure. Its mission is to promote real-world usage of BSV, a **scalable, energy-efficient public blockchain** built for data integrity, enterprise solutions and government applications.",
+         "logo": "https://assets.devfolio.co/hackathons/528f2495b98b4f38ae41139390594a3a/sponsors/a6b93034781d42898b3047d83080a6ff/252.png",
+         "company": {
+          "domain": "https://bsvassociation.org/",
+          "name": "BSV Association",
+          "verified": false,
+          "logo": null,
+          "uuid": "c35b1e14fa604fac98caad13ff7709b8"
+         },
+         "position": 1,
+         "uuid": "a6b93034781d42898b3047d83080a6ff"
+        }
+       ],
+       "name": "Premium",
+       "width": 400,
+       "about": "",
+       "position": 1,
+       "uuid": "6e6c6c9cae954da8bf33e9305a2b7080",
+       "height": null
+      },
+      {
+       "sponsors": [
+        {
+         "name": "Cardano",
+         "about": "[Cardano](https://cardano.org/) is a public blockchain built through **peer-reviewed research** and designed to bring assurance to critical operations. Its core protocols were developed as academic research first, with the node written in Haskell and the ledger built using **formal methods**. The network offers non-custodial staking, **on-chain governance** and a global open-source community, and has been live on mainnet for nine years.",
+         "logo": "https://assets.devfolio.co/hackathons/528f2495b98b4f38ae41139390594a3a/sponsors/7a8e2b85c36f49c4a86b3a39370a16e0/625.png",
+         "company": {
+          "domain": "cardano.org",
+          "name": "Cardano",
+          "verified": false,
+          "logo": null,
+          "uuid": "43813cc9817840b69c1169927a90f2e4"
+         },
+         "position": 1,
+         "uuid": "7a8e2b85c36f49c4a86b3a39370a16e0"
+        },
+        {
+         "name": "API3",
+         "about": "[API3](https://api3.org/) provides **oracle data feeds** to smart contracts and pays the dApps that use them through **OEV Rewards**. It runs 100+ data feeds across chains, and lending protocols such as Morpho, Compound and Moonwell were among the first to earn OEV Rewards. Its early-access **AirnodeHub** is a marketplace where agents can discover, call and pay for APIs on their own, with the data source paid for every response.",
+         "logo": "https://assets.devfolio.co/hackathons/528f2495b98b4f38ae41139390594a3a/sponsors/53ed5b6643a943929f0fa8c110c63b93/678.png",
+         "company": {
+          "domain": "https://api3.org/",
+          "name": "API3",
+          "verified": false,
+          "logo": null,
+          "uuid": "50c0ebf73bb44f7fba42d11cc422e6d0"
+         },
+         "position": 2,
+         "uuid": "53ed5b6643a943929f0fa8c110c63b93"
+        }
+       ],
+       "name": "Standard",
+       "width": 300,
+       "about": "",
+       "position": 2,
+       "uuid": "7ab77a76bbd14f7d9c966a41aac294ac",
+       "height": null
+      },
+      {
+       "sponsors": [
+        {
+         "name": "Adevar Labs",
+         "about": "[Adevar Labs](https://adevarlabs.com/) is a **Web3 security firm** covering every layer of the attack surface, from smart contract audits to infrastructure, operational security and governance. It has completed 100+ audits across Solana, Ethereum, Sui, Aptos and other ecosystems, and also offers formal verification, custom fuzzing, penetration testing and incident response. Its engagements pair a specialist matched to each codebase with an in-house engineer who answers to the firm, and it is recognized by programs including Solana STRIDE, the Circle Alliance Program and the Aptos Foundation Security Credits Program.",
+         "logo": "https://assets.devfolio.co/hackathons/528f2495b98b4f38ae41139390594a3a/sponsors/9ce2ce8fdf8e42748de0b9f55c3e19ab/533.png",
+         "company": {
+          "domain": "https://adevarlabs.com/",
+          "name": "Adevar Labs",
+          "verified": false,
+          "logo": null,
+          "uuid": "67fa16b64b9b4c4987d67af5e2cdf81d"
+         },
+         "position": 1,
+         "uuid": "9ce2ce8fdf8e42748de0b9f55c3e19ab"
+        }
+       ],
+       "name": "Bounty Partners",
+       "width": 200,
+       "about": "",
+       "position": 3,
+       "uuid": "d20db181244c48e9b8bd0286f394b954",
+       "height": null
+      }
+     ],
+     "themes": [],
+     "hackathon_setting": {
+      "winner_announce_at": null,
+      "reg_starts_at": "2026-06-14T22:00:00+00:00",
+      "winner_announced": false,
+      "women_only": false,
+      "reg_ends_at": "2026-10-29T12:00:00+00:00",
+      "facebook": null,
+      "telegram": null,
+      "medium": null,
+      "instagram": "https://www.instagram.com/tumblockchain/",
+      "linkedin": "https://www.linkedin.com/company/tum-blockchain-club/",
+      "external_apply_url": null,
+      "primary_color": "#ff2725",
+      "uuid": "56c74fd7c6dc497a9dc5bd7f13f04916",
+      "twitter": "https://x.com/tbc_munich",
+      "site": "https://hackathon.tum-blockchain.com",
+      "discord": null,
+      "review": false,
+      "slack": null,
+      "logo": "https://assets.devfolio.co/hackathons/528f2495b98b4f38ae41139390594a3a/assets/logo/733.png",
+      "subdomain": "tum",
+      "farcaster": null
+     },
+     "ends_at": "2026-10-31T14:00:00+00:00",
+     "is_online": false,
+     "state": "Bayern",
+     "slug": "tum",
+     "team_min": 1,
+     "themed": false,
+     "discover": false,
+     "participants_count": 695,
+     "hackathon_faqs": [],
+     "team_size": 5,
+     "verified": true,
+     "prizes": [
+      {
+       "parent_prize_uuid": null,
+       "name": "First Place",
+       "is_sponsor_prize": false,
+       "uuid": "aa61cc3c5adf43fd9a749481b2a4e3f5",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Second Place",
+       "is_sponsor_prize": false,
+       "uuid": "56203ec29ca349269eabb9ac94c8c678",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Third Place",
+       "is_sponsor_prize": false,
+       "uuid": "dba845ff2e7b41c293611f3bdbcd9584",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "First Place",
+       "is_sponsor_prize": false,
+       "uuid": "8f8f08112865468599ec10fc7322090f",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Second Place",
+       "is_sponsor_prize": false,
+       "uuid": "dbfdd4c585f44e0eab46393e020d83d1",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Third Place",
+       "is_sponsor_prize": false,
+       "uuid": "681380af58e149f3a6e135dee939be28",
+       "desc": ""
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "First Place: Full Audit Credits",
+       "is_sponsor_prize": false,
+       "uuid": "4cb44c2953fb438680680f4457c44240",
+       "desc": "This prize will include $10,000 in value of smart contract auditing credits at Adevar Labs."
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Second Place: Pre-Audit Core",
+       "is_sponsor_prize": false,
+       "uuid": "6c7f47fc19a04ece833dbfe1219ae38c",
+       "desc": "This prize will include $4,000 in value of smart contract pre-audit credits at Adevar Labs (can be converted into full audit credits)."
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Third Place: Pre-Audit Express",
+       "is_sponsor_prize": false,
+       "uuid": "c2f87b42800f4c4dbe35320d92f21307",
+       "desc": "This prize will include $2,000 in value of smart contract pre-audit credits at Adevar Labs (can be converted into full audit credits)."
+      },
+      {
+       "parent_prize_uuid": null,
+       "name": "Cardano Prize",
+       "is_sponsor_prize": false,
+       "uuid": "a63231d5b523462aa744e24f862840de",
+       "desc": ""
+      }
+     ],
+     "projects_submitted": 0,
+     "name": "TUM Blockchain & AI Hackathon",
+     "tagline": "The hackathon where Blockchain and AI meet",
+     "location": "House of Communication, Friedenstraße, Munich, Germany",
+     "cover_img": "https://assets.devfolio.co/hackathons/528f2495b98b4f38ae41139390594a3a/assets/cover/25.png",
+     "desc": "## The Theme: Agentic Payments\n\nAI agents are starting to act on their own: booking, negotiating, paying. The payment rails for that don't fully exist yet. This hackathon is about building the infrastructure and applications that let autonomous agents transact safely and instantly on-chain.\n\n## Format\n\n- 30-hour build sprint\n- Teams of 1 to 5\n- ~200 builders on site\n- Opening ceremony and partner track briefing on Friday morning\n- Partner workshops, mentor office hours throughout the build\n- Overnight build, lunch, dinner and breakfast on site\n- Live demos and judging\n\n## Prizes\n\n€12,000 across three partner tracks:\n\n- **Cardano Track:** €6,000\n- **BSV Blockchain Track:** €4,000\n- **API3 Track:** €2,000\n\nPick a track, build against the partner's challenge, and compete for its prize pool.\n\n## Details\n\n- **Dates:** 30 to 31 October 2026\n- **Venue:** House of Communication, Munich\n- **Cost:** Free to participate. Accepted hackers also get a free ticket to all three days of TBC26.\n- **Deposit:** Once accepted, you'll be asked to place a €50 deposit on Luma to confirm your spot.\n\n## Why Build With Us\n\nTUM Blockchain Club has brought together 3,000+ builders, researchers and founders over the last four years, running Europe's largest student-led Web3 event. This year the hackathon sits inside TBC26: three days, two venues, one community, with the main conference and Bundesblock's Digital Assets Day running alongside.",
+     "status": "publish",
+     "user_hackathon": null,
+     "user_hackathon_reminder": null
+    }
+   }
+  ]
+ }
+}

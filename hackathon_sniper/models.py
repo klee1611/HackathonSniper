@@ -1,0 +1,224 @@
+import math
+import re
+from collections.abc import Mapping
+from datetime import date, datetime
+from enum import Enum, IntEnum, StrEnum
+from typing import Annotated, Any
+
+from pydantic import BaseModel, BeforeValidator, Field, WithJsonSchema, field_validator
+
+from hackathon_sniper.dates import parse_date
+from hackathon_sniper.urls import canonicalize
+
+
+class Format(StrEnum):
+    ONLINE = "Online"
+    IN_PERSON = "In-person"
+    HYBRID = "Hybrid"
+    UNKNOWN = "Unknown"
+
+
+class Solo(StrEnum):
+    YES = "Yes"
+    NO = "No"
+    UNKNOWN = "Unknown"
+
+
+class Verification(StrEnum):
+    VERIFIED = "Verified"
+    PARTIAL = "Partial"
+    UNVERIFIED = "Unverified"
+
+
+class Lifecycle(StrEnum):
+    ACTIVE = "Active"
+    EXPIRED = "Expired"
+
+
+class TeamPreference(StrEnum):
+    SOLO_ONLY = "Solo only"
+    TEAM_ONLY = "Team only"
+    EITHER = "Either"
+
+
+class Origin(IntEnum):
+    """How much we trust an event's data. Higher wins when merging."""
+
+    SNIPPET = 1
+    SOURCE = 2
+    PAGE = 3
+
+
+_AMOUNT = r"(\d[\d,]*(?:\.\d+)?)\s*([kKmM](?![A-Za-z]))?"
+_NUMBER = re.compile(r"(-?)" + _AMOUNT)
+_CURRENCY_NUMBER = re.compile(r"(?:\$|\bUSD)\s*" + _AMOUNT)
+_MAX_NUMBER_TEXT = 200
+_MULTIPLIERS = {"k": 1_000, "m": 1_000_000}
+
+
+def _letters(text: str) -> str:
+    return re.sub(r"[^a-z]", "", text.lower())
+
+
+def _lenient_enum[E: Enum](
+    enum_cls: type[E], unknown: E, aliases: Mapping[str, E] | None = None
+) -> BeforeValidator:
+    """LLMs say 'in person' or 'ONLINE'; map loosely instead of failing validation.
+
+    Alias keys are compared after normalizing to lowercase letters, so 'True' and
+    True both hit the "true" alias.
+    """
+
+    def parse(value: Any) -> Any:
+        if isinstance(value, enum_cls):
+            return value
+        if value is None:
+            return unknown
+        key = _letters(str(value))
+        for member in enum_cls:
+            if key in (_letters(str(member.value)), _letters(member.name)):
+                return member
+        return (aliases or {}).get(key, unknown)
+
+    return BeforeValidator(parse)
+
+
+def _iso_date_or_none(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value.strip()[:10])
+        except ValueError:
+            return parse_date(value)
+    return None
+
+
+def _int_or_none(value: Any) -> Any:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) and value >= 0 else None
+    if isinstance(value, str):
+        if len(value) > _MAX_NUMBER_TEXT:
+            return None
+        # Prefer a currency-tagged amount: "2nd place: $500" is 500, not 2.
+        match = _CURRENCY_NUMBER.search(value)
+        if match:
+            digits, suffix = match.group(1), match.group(2)
+        else:
+            match = _NUMBER.search(value)
+            if not match or match.group(1):
+                return None
+            digits, suffix = match.group(2), match.group(3)
+        number = float(digits.replace(",", ""))
+        if not math.isfinite(number):
+            return None
+        if suffix:
+            number *= _MULTIPLIERS[suffix.lower()]
+            if not math.isfinite(number):
+                return None
+        return int(number)
+    return value
+
+
+_FORMAT_ALIASES = {
+    "virtual": Format.ONLINE,
+    "remote": Format.ONLINE,
+    "onsite": Format.IN_PERSON,
+    "offline": Format.IN_PERSON,
+    "inperson": Format.IN_PERSON,
+}
+_SOLO_ALIASES = {
+    "true": Solo.YES,
+    "y": Solo.YES,
+    "allowed": Solo.YES,
+    "false": Solo.NO,
+    "n": Solo.NO,
+}
+
+# The advertised JSON schema is deliberately loose (no enum / format / integer-only). Groq
+# validates tool arguments against it server-side, so a strict schema would reject values
+# like "online" or "$10,000" before the lenient BeforeValidators above ever see them.
+LenientFormat = Annotated[
+    Format,
+    _lenient_enum(Format, Format.UNKNOWN, _FORMAT_ALIASES),
+    WithJsonSchema(
+        {"type": ["string", "null"], "description": "Online, In-person, Hybrid or Unknown"}
+    ),
+]
+LenientSolo = Annotated[
+    Solo,
+    _lenient_enum(Solo, Solo.UNKNOWN, _SOLO_ALIASES),
+    WithJsonSchema({"type": ["string", "null"], "description": "Yes, No or Unknown"}),
+]
+LenientDate = Annotated[
+    date | None,
+    BeforeValidator(_iso_date_or_none),
+    WithJsonSchema({"type": ["string", "null"], "description": "YYYY-MM-DD or null"}),
+]
+LenientInt = Annotated[
+    int | None,
+    BeforeValidator(_int_or_none),
+    WithJsonSchema({"type": ["integer", "string", "null"]}),
+]
+
+
+class HackathonEvent(BaseModel):
+    canonical_url: str
+    name: str
+    sources: list[str] = Field(default_factory=list)
+    registration_deadline: date | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    prize_usd: int | None = None
+    format: Format = Format.UNKNOWN
+    location: str | None = None
+    solo_allowed: Solo = Solo.UNKNOWN
+    themes: list[str] = Field(default_factory=list)
+    description: str = ""
+    origin: Origin = Origin.SNIPPET
+    verification: Verification = Verification.UNVERIFIED
+    verified_at: date | None = None
+    last_seen: date | None = None
+    fit_score: int | None = None
+    fit_reason: str | None = None
+    lifecycle: Lifecycle = Lifecycle.ACTIVE
+    notion_page_id: str | None = None
+
+    @field_validator("canonical_url", mode="before")
+    @classmethod
+    def _canonical(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"canonical_url must be a string, got {type(value).__name__}")
+        return canonicalize(value)
+
+    def closing_date(self) -> date | None:
+        return self.registration_deadline or self.end_date
+
+    def is_expired(self, today: date) -> bool:
+        closing = self.closing_date()
+        return closing is not None and closing < today
+
+
+class Profile(BaseModel):
+    skills: list[str] = Field(default_factory=list)
+    interests: list[str] = Field(default_factory=list)
+    formats: list[Format] = Field(default_factory=list)
+    team: TeamPreference = TeamPreference.EITHER
+    min_prize_usd: int | None = None
+    location: str | None = None
+    notes: str = ""
+
+
+class Participation(BaseModel):
+    hackathon: str | None = None
+    project: str = ""
+    role: str | None = None
+    tech_stack: list[str] = Field(default_factory=list)
+    outcome: str | None = None
+    notes: str = ""

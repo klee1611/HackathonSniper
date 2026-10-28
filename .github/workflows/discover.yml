@@ -1,0 +1,52 @@
+name: Discover hackathons
+on:
+  schedule:
+    - cron: "17 0 * * *" # daily 00:17 UTC (off the hour = less queue delay). Adjust to your timezone.
+    # Note: GitHub disables scheduled workflows in public repos after 60 days without repo activity; re-enable from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip Notion writes"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never run two discoveries at once (both would write to Notion); queue instead of cancelling.
+concurrency:
+  group: discover
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+      SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_HACKATHONS_DB_ID: ${{ secrets.NOTION_HACKATHONS_DB_ID }}
+      NOTION_PARTICIPATIONS_DB_ID: ${{ secrets.NOTION_PARTICIPATIONS_DB_ID }}
+      NOTION_PROFILE_PAGE_ID: ${{ secrets.NOTION_PROFILE_PAGE_ID }}
+      SEARCH_PROVIDER: ${{ vars.SEARCH_PROVIDER || 'brave' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          # No dependency cache in jobs holding secrets: a cache saved by another run must not flow in here.
+          enable-cache: false
+      - run: uv sync --locked --no-dev
+      - name: Run discovery
+        env:
+          # Passed via env (never interpolated into the script). Empty on scheduled runs.
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            uv run python -m hackathon_sniper --dry-run
+          else
+            uv run python -m hackathon_sniper
+          fi

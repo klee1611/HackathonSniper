@@ -1,0 +1,107 @@
+import pytest
+from pydantic import ValidationError
+
+from hackathon_sniper.config import Settings
+from tests.factories import make_settings
+
+REQUIRED = {
+    "GROQ_API_KEY": "g",
+    "NOTION_TOKEN": "n",
+    "NOTION_HACKATHONS_DB_ID": "h",
+    "NOTION_PARTICIPATIONS_DB_ID": "p",
+    "NOTION_PROFILE_PAGE_ID": "pr",
+}
+
+
+@pytest.fixture
+def env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    for key, value in REQUIRED.items():
+        monkeypatch.setenv(key, value)
+    for key in ("SEARCH_PROVIDER", "BRAVE_API_KEY", "SERPAPI_API_KEY", "MAX_VERIFY", "DRY_RUN"):
+        monkeypatch.delenv(key, raising=False)
+    return monkeypatch
+
+
+def test_reads_env_with_defaults(env: pytest.MonkeyPatch) -> None:
+    env.setenv("BRAVE_API_KEY", "b")
+    s = Settings(_env_file=None)
+    assert (s.search_provider, s.max_verify, s.dry_run) == ("brave", 15, False)
+    assert s.notion_hackathons_db_id == "h"
+
+
+def test_requires_key_for_selected_provider(env: pytest.MonkeyPatch) -> None:
+    env.setenv("SEARCH_PROVIDER", "serpapi")
+    env.setenv("BRAVE_API_KEY", "b")
+    with pytest.raises(ValidationError, match="SERPAPI"):
+        Settings(_env_file=None)
+
+
+def test_empty_env_value_is_treated_as_unset(env: pytest.MonkeyPatch) -> None:
+    env.setenv("BRAVE_API_KEY", "b")
+    env.setenv("MAX_VERIFY", "")
+    assert Settings(_env_file=None).max_verify == 15
+
+
+def test_empty_required_value_is_rejected(env: pytest.MonkeyPatch) -> None:
+    env.setenv("BRAVE_API_KEY", "b")
+    env.setenv("GROQ_API_KEY", "")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_errors_do_not_echo_secret_values(env: pytest.MonkeyPatch) -> None:
+    env.setenv("GROQ_API_KEY", "sk-PLANTED")
+    env.setenv("SEARCH_PROVIDER", "serpapi")
+    with pytest.raises(ValidationError) as exc:
+        Settings(_env_file=None)
+    message = str(exc.value)
+    # pydantic truncates long reprs ("sk-PLAN..."), so check the prefix too.
+    assert "sk-PLANTED" not in message
+    assert "sk-PLAN" not in message
+
+
+@pytest.mark.parametrize("override", [{"llm_concurrency": 0}, {"max_verify": -1}])
+def test_numeric_bounds(override: dict[str, int]) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(**override)
+
+
+def test_shell_env_does_not_leak_into_factories() -> None:
+    # conftest clears Settings env vars, so e.g. SEARCH_PROVIDER=serpapi in the shell is ignored.
+    s = make_settings()
+    assert (s.search_provider, s.max_verify) == ("brave", 15)
+
+
+def test_strips_surrounding_whitespace_from_string_settings(env: pytest.MonkeyPatch) -> None:
+    env.setenv("BRAVE_API_KEY", " b\n")
+    env.setenv("NOTION_HACKATHONS_DB_ID", "abc\n")
+    s = Settings(_env_file=None)
+    assert s.notion_hackathons_db_id == "abc"
+    assert s.brave_api_key == "b"
+
+
+def test_rank_budget_reserve_default_and_bounds() -> None:
+    assert make_settings().rank_budget_reserve == 8
+    with pytest.raises(ValidationError):
+        make_settings(rank_budget_reserve=-1)
+
+
+def test_scrub_replaces_every_configured_secret() -> None:
+    s = make_settings(
+        groq_api_key="gsk_groq_secret_1",
+        notion_token="ntn_notion_secret",
+        search_provider="serpapi",
+        brave_api_key="brave-secret-123",
+        serpapi_api_key="serp-secret-456",
+    )
+    text = (
+        "a gsk_groq_secret_1 b ntn_notion_secret c brave-secret-123 d serp-secret-456 "
+        "gsk_groq_secret_1"
+    )
+    assert s.scrub(text) == "a REDACTED b REDACTED c REDACTED d REDACTED REDACTED"
+
+
+def test_scrub_skips_short_and_missing_secrets() -> None:
+    s = make_settings(groq_api_key="short", notion_token="1234567", brave_api_key="b")
+    assert s.serpapi_api_key is None
+    assert s.scrub("short 1234567 b test") == "short 1234567 b test"
