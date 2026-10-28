@@ -1,4 +1,5 @@
 import copy
+import threading
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 
 from hackathon_sniper.http import Page
 from hackathon_sniper.llm.base import LLMBudget
+from hackathon_sniper.notion.client import NotionError
 from hackathon_sniper.search import SearchResult
 
 T = TypeVar("T", bound=BaseModel)
@@ -56,16 +58,25 @@ class FakeFetcher:
 
 
 class FakeNotion:
-    """In-memory Notion. update_page merges properties exactly like PATCH /pages.
+    """In-memory Notion that fails the way NotionGateway does.
 
-    Reads return deep copies so callers can't mutate stored state; writes are recorded.
+    - update_page merges properties exactly like PATCH /pages (other columns survive).
+    - Unknown database or page ids raise NotionError, like the real 404s.
+    - Reads return deep copies so callers can't mutate stored state; writes are recorded.
+    - All access is serialised by a lock (graph branches may run in threads).
     """
 
     def __init__(self) -> None:
         self.pages: dict[str, dict[str, Any]] = {}
         self.page_text: dict[str, str] = {}
+        self.databases: set[str] = set()
         self.writes: list[tuple[str, str]] = []
         self._next = 0
+        self._lock = threading.Lock()
+
+    def add_database(self, database_id: str) -> None:
+        with self._lock:
+            self.databases.add(database_id)
 
     def add_page(
         self,
@@ -74,31 +85,59 @@ class FakeNotion:
         page_id: str | None = None,
         text: str = "",
     ) -> str:
-        """Seed a page without recording a write."""
-        self._next += 1
-        pid = page_id or f"page-{self._next}"
-        self.pages[pid] = {
-            "id": pid,
+        """Seed a page without recording a write. database_id=None means a standalone page."""
+        with self._lock:
+            return self._insert(database_id, properties, page_id, text)
+
+    def _insert(
+        self, database_id: str | None, properties: dict[str, Any], page_id: str | None, text: str
+    ) -> str:
+        if page_id is None:
+            while True:  # never let a generated id overwrite a seeded page
+                self._next += 1
+                page_id = f"fake-{self._next:08d}"
+                if page_id not in self.pages:
+                    break
+        if database_id is not None:
+            self.databases.add(database_id)
+        self.pages[page_id] = {
+            "id": page_id,
             "database_id": database_id,
             "properties": copy.deepcopy(properties),
         }
-        self.page_text[pid] = text
-        return pid
+        self.page_text[page_id] = text
+        return page_id
+
+    def _page(self, page_id: str) -> dict[str, Any]:
+        page = self.pages.get(page_id)
+        if page is None:
+            raise NotionError(f"GET /pages/{page_id} -> 404: object_not_found")
+        return page
 
     def query_all(self, database_id: str) -> list[dict[str, Any]]:
-        return [copy.deepcopy(p) for p in self.pages.values() if p["database_id"] == database_id]
+        with self._lock:
+            if database_id not in self.databases:
+                raise NotionError(f"POST /databases/{database_id}/query -> 404: object_not_found")
+            return [
+                copy.deepcopy(p) for p in self.pages.values() if p["database_id"] == database_id
+            ]
 
     def get_page(self, page_id: str) -> dict[str, Any]:
-        return copy.deepcopy(self.pages[page_id])
+        with self._lock:
+            return copy.deepcopy(self._page(page_id))
 
     def get_page_text(self, page_id: str) -> str:
-        return self.page_text.get(page_id, "")
+        with self._lock:
+            self._page(page_id)
+            return self.page_text[page_id]
 
     def create_page(self, database_id: str, properties: dict[str, Any]) -> str:
-        pid = self.add_page(database_id, properties)
-        self.writes.append(("create", pid))
-        return pid
+        with self._lock:
+            pid = self._insert(database_id, properties, None, "")
+            self.writes.append(("create", pid))
+            return pid
 
     def update_page(self, page_id: str, properties: dict[str, Any]) -> None:
-        self.pages[page_id]["properties"].update(copy.deepcopy(properties))
-        self.writes.append(("update", page_id))
+        with self._lock:
+            self._page(page_id)["properties"].update(copy.deepcopy(properties))
+            self.writes.append(("update", page_id))

@@ -35,11 +35,18 @@ def make_deps(
     fetcher: FakeFetcher | None = None,
     **settings: Any,
 ) -> Deps:
+    resolved = make_settings(**settings)
     notion = notion or FakeNotion()
-    if "profile" not in notion.pages:
-        notion.add_page(None, profile_to_properties(Profile(interests=["AI"])), page_id="profile")
+    notion.add_database(resolved.notion_hackathons_db_id)
+    notion.add_database(resolved.notion_participations_db_id)
+    if resolved.notion_profile_page_id not in notion.pages:
+        notion.add_page(
+            None,
+            profile_to_properties(Profile(interests=["AI"])),
+            page_id=resolved.notion_profile_page_id,
+        )
     return Deps(
-        settings=make_settings(**settings),
+        settings=resolved,
         llm=llm or FakeLLM(),
         search=search or FakeSearch({}),
         sources=sources if sources is not None else {},
