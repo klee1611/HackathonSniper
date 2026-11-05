@@ -152,17 +152,28 @@ def test_user_columns_survive_upsert() -> None:
     assert page_to_event(page).verification == Verification.VERIFIED  # type: ignore[union-attr]
 
 
-def test_expired_rows_are_archived() -> None:
+def test_expired_rows_are_trashed_unless_linked_from_participations() -> None:
     notion = FakeNotion()
-    pid = notion.add_page(
+    past = TODAY - timedelta(days=1)
+    gone = notion.add_page(
         "hackathons",
-        event_to_properties(
-            event(url="https://f.dev", name="F", registration_deadline=TODAY - timedelta(days=1))
-        ),
+        event_to_properties(event(url="https://f.dev", name="F", registration_deadline=past)),
+    )
+    kept = notion.add_page(
+        "hackathons",
+        event_to_properties(event(url="https://k.dev", name="K", registration_deadline=past)),
+    )
+    notion.add_page(
+        "participations",
+        {
+            "Project": {"title": [{"text": {"content": "My bot"}}]},
+            "Hackathon": {"relation": [{"id": kept}]},
+        },
     )
     final = run(make_deps(llm=FakeLLM(llm_handlers()), notion=notion))
-    assert page_to_event(notion.get_page(pid)).lifecycle == Lifecycle.EXPIRED  # type: ignore[union-attr]
-    assert final["sync_result"].archived == 1
+    assert gone in notion.trashed
+    assert page_to_event(notion.get_page(kept)).lifecycle == Lifecycle.EXPIRED  # type: ignore[union-attr]
+    assert (final["sync_result"].trashed, final["sync_result"].archived) == (1, 1)
 
 
 def test_dry_run_never_writes() -> None:

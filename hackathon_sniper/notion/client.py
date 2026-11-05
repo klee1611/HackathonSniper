@@ -185,6 +185,10 @@ class NotionGateway:
     def update_page(self, page_id: str, properties: dict[str, Any]) -> None:
         self._request("PATCH", f"/pages/{_id(page_id)}", json={"properties": properties})
 
+    def trash_page(self, page_id: str) -> None:
+        """Move a page to Notion's Trash (restorable there for 30 days)."""
+        self._request("PATCH", f"/pages/{_id(page_id)}", json={"archived": True})
+
     def get_database(self, database_id: str) -> dict[str, Any]:
         return self._request("GET", f"/databases/{_id(database_id)}")
 

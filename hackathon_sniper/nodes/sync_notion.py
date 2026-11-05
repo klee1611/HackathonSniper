@@ -6,6 +6,11 @@ Rules:
 - Lifecycle is recomputed from dates: Expired iff the closing date is before today, so an
   extended deadline re-activates a row. A row already Expired (possibly set by hand) stays
   Expired unless its closing date moved later. Archiving is just Active -> Expired.
+- Trash (Notion's Trash, restorable for 30 days) instead of keeping a row when either
+  - its closing date (registration deadline, else end date) has passed, or
+  - it has no closing date and no source has seen it for STALE_UNDATED_DAYS (a row with no
+    Last Seen at all, e.g. one added by hand, is never trashed for staleness).
+  Rows linked from My Participations are never trashed; they are marked Expired instead.
 - Already-closed events never get a new row.
 - Only agent-owned columns are sent; PATCH keeps the user's own columns.
 - Write budget: a row whose only change is Last Seen is skipped unless the stored Last Seen is
@@ -61,15 +66,26 @@ def _lifecycle(ev: HackathonEvent, old: HackathonEvent | None, today: date) -> L
     return Lifecycle.ACTIVE
 
 
+def _should_trash(ev: HackathonEvent, today: date, stale_days: int) -> bool:
+    if ev.is_expired(today):
+        return True
+    return (
+        ev.closing_date() is None
+        and ev.last_seen is not None
+        and (today - ev.last_seen).days >= stale_days
+    )
+
+
 def _error(url: str, exc: Exception) -> str:
     message = f"sync {url}: {type(exc).__name__}: {exc}"
     return message if len(message) <= MAX_ERROR_CHARS else message[: MAX_ERROR_CHARS - 1] + "…"
 
 
 def sync_notion(state: GraphState, deps: Deps) -> dict[str, Any]:
-    """Upsert keyed by URL. Archive by date only — never because a row wasn't seen today."""
+    """Upsert keyed by URL. Expire/trash by date, or trash undated rows unseen for a long time."""
     s = deps.settings
     existing = state.get("existing", {})
+    linked = state.get("linked", set())
     result = SyncResult()
     errors: list[str] = []
     done: set[str] = set()
@@ -93,6 +109,16 @@ def sync_notion(state: GraphState, deps: Deps) -> dict[str, Any]:
         lifecycle = _lifecycle(ev, old, deps.today)
         ev = ev.model_copy(update={"lifecycle": lifecycle, "notion_page_id": page_id})
         try:
+            if (
+                old is not None
+                and page_id is not None
+                and page_id not in linked
+                and _should_trash(ev, deps.today, s.stale_undated_days)
+            ):
+                if not s.dry_run:
+                    deps.notion.trash_page(page_id)
+                result.trashed += 1
+                continue
             properties = event_to_properties(ev)
             if page_id is None:
                 if lifecycle == Lifecycle.EXPIRED:

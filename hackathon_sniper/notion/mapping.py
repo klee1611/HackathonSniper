@@ -352,10 +352,15 @@ def page_to_profile(page: dict[str, Any], body: str) -> Profile:
     )
 
 
-def page_to_participation(page: dict[str, Any], names_by_id: dict[str, str]) -> Participation:
+def participation_hackathon_ids(page: dict[str, Any]) -> list[str]:
+    """Hackathons page ids this participation links to (its "Hackathon" relation)."""
     relation = _prop(page, "Hackathon").get("relation")
     links = relation if isinstance(relation, list) else []
-    related = [r.get("id") for r in links if isinstance(r, dict)]
+    return [r["id"] for r in links if isinstance(r, dict) and isinstance(r.get("id"), str)]
+
+
+def page_to_participation(page: dict[str, Any], names_by_id: dict[str, str]) -> Participation:
+    related = participation_hackathon_ids(page)
     return Participation(
         hackathon=next((names_by_id[r] for r in related if r in names_by_id), None),
         project=_read_text(_prop(page, "Project")),

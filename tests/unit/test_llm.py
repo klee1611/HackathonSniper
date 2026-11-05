@@ -6,7 +6,7 @@ import pytest
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel
 
-from hackathon_sniper.llm.base import BudgetExceeded, LLMBudget, LLMError
+from hackathon_sniper.llm.base import BudgetExceeded, LLMBudget, LLMError, LLMUnavailable
 from hackathon_sniper.llm.groq import GroqLLM
 
 
@@ -125,3 +125,48 @@ def test_budget_remaining_is_floored_at_zero() -> None:
     assert LLMBudget(0).remaining == 0
     budget.limit = 0
     assert budget.remaining == 0
+
+
+def api_error(cls: type[groq.APIStatusError], status: int) -> groq.APIStatusError:
+    body = {"error": {"message": "nope", "type": "invalid_request_error", "code": "x"}}
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    response = httpx.Response(status, request=request, json=body)
+    return cls(f"Error code: {status}", response=response, body=body)
+
+
+@pytest.mark.parametrize(
+    ("cls", "status"),
+    [(groq.NotFoundError, 404), (groq.AuthenticationError, 401), (groq.PermissionDeniedError, 403)],
+)
+def test_fatal_provider_error_marks_llm_unavailable_and_fails_fast(
+    cls: type[groq.APIStatusError], status: int
+) -> None:
+    llm, chat = make([api_error(cls, status), Answer(value=1)])
+    assert llm.unavailable is None
+    with pytest.raises(LLMUnavailable):
+        llm.structured(Answer, "sys", "user")
+    assert llm.unavailable and cls.__name__ in llm.unavailable
+    # Later calls fail without spending budget or contacting the provider.
+    with pytest.raises(LLMUnavailable):
+        llm.structured(Answer, "sys", "user")
+    assert llm.budget.used == 1
+    assert len(chat.prompts) == 1
+
+
+def test_transient_provider_error_does_not_mark_unavailable() -> None:
+    llm, _ = make([api_error(groq.InternalServerError, 500), Answer(value=2)])
+    with pytest.raises(LLMError) as info:
+        llm.structured(Answer, "sys", "user")
+    assert not isinstance(info.value, LLMUnavailable)
+    assert llm.unavailable is None
+    assert llm.structured(Answer, "sys", "user").value == 2
+
+
+@pytest.mark.parametrize(
+    ("model", "effort"),
+    [("openai/gpt-oss-120b", "low"), ("openai/gpt-oss-20b", "low"), ("qwen/qwen3.8-27b", None)],
+)
+def test_real_client_config(model: str, effort: str | None) -> None:
+    chat = GroqLLM("gsk_test", model, LLMBudget(1))._chat
+    assert chat.max_retries == 5
+    assert chat.reasoning_effort == effort

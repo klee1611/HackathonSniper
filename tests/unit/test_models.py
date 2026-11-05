@@ -144,3 +144,16 @@ def test_event_rejects_url_without_host() -> None:
 def test_event_rejects_non_string_url() -> None:
     with pytest.raises(ValidationError):
         HackathonEvent.model_validate({"canonical_url": None, "name": "x"})
+
+
+def test_lenient_str_list_accepts_null_in_schema_and_value() -> None:
+    from pydantic import BaseModel, Field
+
+    from hackathon_sniper.models import LenientStrList
+
+    class M(BaseModel):
+        themes: LenientStrList = Field(default_factory=list)
+
+    assert M.model_json_schema()["properties"]["themes"]["type"] == ["array", "null"]
+    assert M.model_validate({"themes": None}).themes == []
+    assert M.model_validate({"themes": ["AI"]}).themes == ["AI"]

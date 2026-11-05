@@ -46,7 +46,7 @@ def test_report_shows_skipped_and_not_yet_scored() -> None:
     }
     md = render_report(state, deps)
     assert "Not yet scored: 2" in md
-    assert "1 created, 0 updated, 0 archived, 0 unchanged, 4 skipped, 1 failed" in md
+    assert "1 created, 0 updated, 0 archived, 0 trashed, 0 unchanged, 4 skipped, 1 failed" in md
     assert "https://e.dev" not in md  # zero / filtered scores aren't "top matches"
     assert "Mode: live" in md
 
@@ -140,6 +140,15 @@ def test_exit_code_fails_on_many_sync_errors_or_half_the_sources_down() -> None:
     assert exit_code({"source_failures": ["mlh"]}, deps) == 0
     assert exit_code({"source_failures": ["mlh", "web"]}, deps) == 1
     assert exit_code({"source_failures": ["mlh", "mlh"]}, deps) == 0  # deduplicated
+
+
+def test_exit_code_fails_and_report_says_so_when_llm_unavailable() -> None:
+    deps = make_deps(sources={"devpost": lambda: [], "mlh": lambda: []})
+    deps.llm.unavailable = "Groq unavailable (NotFoundError): model `x` does not exist"
+    assert exit_code({"sync_result": SyncResult(created=5)}, deps) == 1
+    assert "LLM unavailable" in render_report({}, deps)
+    deps.llm.unavailable = None
+    assert "LLM unavailable" not in render_report({}, deps)
 
 
 @pytest.mark.parametrize(

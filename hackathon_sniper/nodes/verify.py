@@ -2,7 +2,7 @@ import re
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from hackathon_sniper.deps import Deps
 from hackathon_sniper.http import Page
@@ -14,6 +14,7 @@ from hackathon_sniper.models import (
     LenientFormat,
     LenientInt,
     LenientSolo,
+    LenientStrList,
     Origin,
     Solo,
     Verification,
@@ -58,12 +59,7 @@ class PageFacts(BaseModel):
     format: LenientFormat = Format.UNKNOWN
     solo_allowed: LenientSolo = Solo.UNKNOWN
     location: str | None = None
-    themes: list[str] = Field(default_factory=list)
-
-    @field_validator("themes", mode="before")
-    @classmethod
-    def _none_is_empty(cls, v: Any) -> Any:
-        return [] if v is None else v
+    themes: LenientStrList = Field(default_factory=list)
 
 
 def _norm(text: str) -> str:

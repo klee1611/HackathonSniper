@@ -154,7 +154,7 @@ def test_main_needs_only_groq_key(monkeypatch: pytest.MonkeyPatch, capsys: Any) 
     monkeypatch.setattr(extraction_eval, "GroqLLM", fake_groq)
     monkeypatch.setattr(extraction_eval, "run_eval", lambda d, llm: "REPORT")
     extraction_eval.main()
-    assert built == {"api_key": "gsk_test", "model": "llama-3.3-70b-versatile", "limit": 500}
+    assert built == {"api_key": "gsk_test", "model": "openai/gpt-oss-120b", "limit": 500}
     assert "REPORT" in capsys.readouterr().out
 
 

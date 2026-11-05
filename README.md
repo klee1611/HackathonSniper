@@ -10,7 +10,7 @@
 - **Direct sources 📡** — Devpost, MLH, and Devfolio listings, plus Brave (or SerpApi) web search
 - **Verified details 🔎** — reads each event page; deadlines and prizes are kept only when backed by a quote from the page
 - **Personal ranking 🎯** — scores events against your Notion profile and past participations
-- **Self-maintaining Notion 📊** — upserts by URL, archives closed events, never touches columns you add
+- **Self-maintaining Notion 📊** — upserts by URL, moves closed events to Notion's Trash (restorable for 30 days; events linked from My Participations are kept and marked Expired), never touches columns you add
 - **Free to run 💸** — daily GitHub Actions cron, Groq free tier, hard per-run LLM budget
 
 ## Demo 🎬
@@ -70,13 +70,14 @@ All settings come from environment variables or `.env`; see [`.env.example`](.en
 | Variable | Default | Purpose |
 |---|---|---|
 | `SEARCH_PROVIDER` | `brave` | `brave` or `serpapi` (needs the matching API key) |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model for all four agents |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model for all four agents |
 | `MAX_QUERIES` | `10` | web searches per run |
 | `MAX_VERIFY` | `15` | event pages verified per run (`--max-verify N` overrides once) |
 | `LLM_CALL_BUDGET` | `60` | hard cap on LLM calls per run |
 | `RANK_BUDGET_RESERVE` | `8` | calls verification leaves for the Ranker |
 | `LLM_CONCURRENCY` | `2` | parallel LLM calls |
 | `REVERIFY_AFTER_DAYS` | `7` | re-check a known event's page after this many days |
+| `STALE_UNDATED_DAYS` | `30` | trash a row with no deadline/end date that no source has seen for this many days |
 | `MLH_SEASON` | blank | blank = current + next MLH season |
 | `LOG_LEVEL` | `INFO` | standard Python log level |
 
@@ -89,7 +90,7 @@ make check   # ruff + mypy + pytest (no network, no API keys)
 make eval    # Verifier accuracy on labeled pages (real Groq calls)
 ```
 
-Golden scenarios in `tests/scenarios/` encode the design rules: duplicates merge, outages never archive, unsupported quotes are dropped, budget exhaustion degrades gracefully, your columns survive, closed events are archived, dry runs never write. Eval cases live in `evals/cases/` (see its README). Run `make help` for every target.
+Golden scenarios in `tests/scenarios/` encode the design rules: duplicates merge, outages never archive, unsupported quotes are dropped, budget exhaustion degrades gracefully, your columns survive, closed events are trashed (unless linked from My Participations), dry runs never write. Eval cases live in `evals/cases/` (see its README). Run `make help` for every target.
 
 ## License 📝
 

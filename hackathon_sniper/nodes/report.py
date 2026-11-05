@@ -7,8 +7,10 @@ HTML, or ping people via @mentions / #references.
 
 Exit code: red only for real problems, never for one persistent bad row. Notion sync turns
 the run red when failures are >= MIN_SYNC_FAILURES and >= SYNC_FAILURE_PERCENT% of attempted
-writes (created + updated + archived + failed); failures below that are still listed in the
-summary. Sources turn it red when at least half of them (including web search) failed.
+writes (created + updated + archived + trashed + failed); failures below that are still
+listed in the summary. Sources turn it red when at least half of them (including web search) failed.
+The LLM turns it red when the provider rejected the run outright (bad key, retired model):
+every node degrades gracefully, so without this such a run would silently stay green.
 """
 
 from collections import Counter
@@ -91,7 +93,13 @@ def render_report(state: GraphState, deps: Deps) -> str:
         f"- Verified this run: {len(state.get('verified', []))}",
         f"- Not yet scored: {unscored}",
         f"- LLM calls: {deps.llm.budget.used}/{deps.llm.budget.limit}",
+        *(
+            [f"- **LLM unavailable:** {md(deps.llm.unavailable, MAX_ERROR_CHARS)}"]
+            if deps.llm.unavailable
+            else []
+        ),
         f"- Notion: {sync.created} created, {sync.updated} updated, {sync.archived} archived, "
+        f"{sync.trashed} trashed, "
         f"{sync.unchanged} unchanged, {sync.skipped} skipped, {sync.failed} failed",
     ]
     top = [e for e in ranked if (e.fit_score or 0) > 0][:TOP_MATCHES]
@@ -119,15 +127,16 @@ def report(state: GraphState, deps: Deps) -> dict[str, Any]:
 def _sync_failed(sync: SyncResult) -> bool:
     """Persistent per-row failures are listed but only turn the run red when they're many:
     ≥ MIN_SYNC_FAILURES and ≥ SYNC_FAILURE_PERCENT% of attempted writes."""
-    attempted = sync.created + sync.updated + sync.archived + sync.failed
+    attempted = sync.created + sync.updated + sync.archived + sync.trashed + sync.failed
     many = sync.failed >= MIN_SYNC_FAILURES
     return many and sync.failed * 100 >= SYNC_FAILURE_PERCENT * attempted
 
 
 def exit_code(state: GraphState, deps: Deps) -> int:
     """Red run (→ GitHub email) only for real problems: Notion sync broadly failing, or
-    at least half the sources down."""
+    at least half the sources down, or the LLM provider rejecting the run outright."""
     sync = state.get("sync_result") or SyncResult()
     total_sources = len(deps.sources) + 1  # + web search
     failed_sources = len(set(state.get("source_failures", [])))
-    return 1 if _sync_failed(sync) or failed_sources * 2 >= total_sources else 0
+    sources_down = failed_sources * 2 >= total_sources
+    return 1 if _sync_failed(sync) or sources_down or deps.llm.unavailable else 0
