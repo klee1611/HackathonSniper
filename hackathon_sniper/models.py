@@ -167,6 +167,12 @@ LenientInt = Annotated[
     WithJsonSchema({"type": ["integer", "string", "null"]}),
 ]
 
+LenientStrList = Annotated[
+    list[str],
+    BeforeValidator(lambda v: [] if v is None else v),
+    WithJsonSchema({"type": ["array", "null"], "items": {"type": "string"}}),
+]
+
 
 class HackathonEvent(BaseModel):
     canonical_url: str

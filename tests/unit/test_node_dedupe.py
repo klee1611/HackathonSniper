@@ -133,7 +133,7 @@ def test_merges_duplicates_and_splits_verify_queue() -> None:
     )
 
 
-def test_expired_lifecycle_rows_not_seen_today_are_dropped() -> None:
+def test_date_expired_rows_not_seen_today_pass_through_so_sync_can_trash_them() -> None:
     archived = event(
         url="https://archived.dev",
         lifecycle=Lifecycle.EXPIRED,
@@ -141,6 +141,17 @@ def test_expired_lifecycle_rows_not_seen_today_are_dropped() -> None:
         notion_page_id="p9",
     )
     out = dedupe({"existing": {archived.canonical_url: archived}, "candidates": []}, make_deps())
+    assert (out["to_verify"], out["passthrough"]) == ([], [archived])
+
+
+def test_manually_expired_future_rows_not_seen_today_are_dropped() -> None:
+    dismissed = event(
+        url="https://dismissed.dev",
+        lifecycle=Lifecycle.EXPIRED,
+        registration_deadline=TODAY + timedelta(days=20),
+        notion_page_id="p8",
+    )
+    out = dedupe({"existing": {dismissed.canonical_url: dismissed}, "candidates": []}, make_deps())
     assert (out["to_verify"], out["passthrough"]) == ([], [])
 
 

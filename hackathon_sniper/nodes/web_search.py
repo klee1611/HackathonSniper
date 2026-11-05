@@ -2,7 +2,7 @@ import logging
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError
 
 from hackathon_sniper.deps import Deps
 from hackathon_sniper.llm.base import BudgetExceeded, LLMError
@@ -13,6 +13,7 @@ from hackathon_sniper.models import (
     LenientFormat,
     LenientInt,
     LenientSolo,
+    LenientStrList,
     Origin,
     Solo,
 )
@@ -60,12 +61,7 @@ class ExtractedEvent(BaseModel):
     prize_usd: LenientInt = None
     format: LenientFormat = Format.UNKNOWN
     solo_allowed: LenientSolo = Solo.UNKNOWN
-    themes: list[str] = Field(default_factory=list)
-
-    @field_validator("themes", mode="before")
-    @classmethod
-    def _none_is_empty(cls, v: Any) -> Any:
-        return [] if v is None else v
+    themes: LenientStrList = Field(default_factory=list)
 
 
 class Extraction(BaseModel):

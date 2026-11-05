@@ -105,8 +105,10 @@ def dedupe(state: GraphState, deps: Deps) -> dict[str, Any]:
         seen[url] = merge(seen[url], candidate) if url in seen else candidate
 
     pool = {url: merge(existing[url], ev) if url in existing else ev for url, ev in seen.items()}
-    for url, row in existing.items():  # active rows not seen today still get re-verified / archived
-        if url not in pool and row.lifecycle == Lifecycle.ACTIVE:
+    # Rows not seen today still get re-verified, expired or trashed. A row Expired by hand
+    # with no past date is left alone.
+    for url, row in existing.items():
+        if url not in pool and (row.lifecycle == Lifecycle.ACTIVE or row.is_expired(today)):
             pool[url] = row
 
     to_verify: list[HackathonEvent] = []

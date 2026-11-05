@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     groq_api_key: str
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
 
     notion_token: str
     notion_hackathons_db_id: str
@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     # LLM calls verify leaves unspent so the Ranker can still score this run's events.
     rank_budget_reserve: int = Field(default=8, ge=0)
     reverify_after_days: int = Field(default=7, ge=0)
+    # An undated row no source has seen for this many days goes to Notion's Trash.
+    stale_undated_days: int = Field(default=30, ge=1)
     dry_run: bool = False
 
     @model_validator(mode="after")

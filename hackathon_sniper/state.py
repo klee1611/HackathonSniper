@@ -9,7 +9,8 @@ from hackathon_sniper.models import HackathonEvent, Participation, Profile
 class SyncResult(BaseModel):
     created: int = 0
     updated: int = 0
-    archived: int = 0
+    archived: int = 0  # newly marked Expired (kept: linked from My Participations)
+    trashed: int = 0  # moved to Notion's Trash
     unchanged: int = 0
     failed: int = 0
     skipped: int = 0
@@ -19,6 +20,7 @@ class GraphState(TypedDict, total=False):
     profile: Profile
     history: list[Participation]
     existing: dict[str, HackathonEvent]  # canonical_url -> row already in Notion
+    linked: set[str]  # Hackathons page ids referenced from My Participations (never trashed)
     queries: list[str]
     candidates: Annotated[list[HackathonEvent], operator.add]  # parallel sources append
     to_verify: list[HackathonEvent]

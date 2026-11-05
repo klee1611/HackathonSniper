@@ -23,6 +23,7 @@ class FakeLLM:
     ) -> None:
         self.handlers = handlers or {}
         self.budget = budget or LLMBudget(1000)
+        self.unavailable: str | None = None
         self.calls: list[tuple[type[Any], str]] = []
 
     def structured(self, schema: type[T], system: str, user: str) -> T:
@@ -71,6 +72,7 @@ class FakeNotion:
         self.page_text: dict[str, str] = {}
         self.databases: set[str] = set()
         self.writes: list[tuple[str, str]] = []
+        self.trashed: dict[str, dict[str, Any]] = {}
         self._next = 0
         self._lock = threading.Lock()
 
@@ -141,3 +143,10 @@ class FakeNotion:
         with self._lock:
             self._page(page_id)["properties"].update(copy.deepcopy(properties))
             self.writes.append(("update", page_id))
+
+    def trash_page(self, page_id: str) -> None:
+        """Trashed pages vanish from reads, like Notion's (non-trash) queries."""
+        with self._lock:
+            self._page(page_id)
+            self.trashed[page_id] = self.pages.pop(page_id)
+            self.writes.append(("trash", page_id))

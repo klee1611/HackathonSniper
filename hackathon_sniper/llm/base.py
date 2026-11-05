@@ -10,6 +10,10 @@ class LLMError(Exception):
     """The provider failed or returned unusable output."""
 
 
+class LLMUnavailable(LLMError):
+    """The provider can't serve this run at all (bad key, retired model); retrying is pointless."""
+
+
 class BudgetExceeded(LLMError):
     """The per-run LLM call budget is spent."""
 
@@ -36,5 +40,8 @@ class LLMBudget:
 
 class LLM(Protocol):
     budget: LLMBudget
+    # Set once the provider is unusable for the whole run; later calls fail fast and the
+    # run exits red (see nodes.report.exit_code).
+    unavailable: str | None
 
     def structured(self, schema: type[T], system: str, user: str) -> T: ...

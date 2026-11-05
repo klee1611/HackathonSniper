@@ -4,7 +4,12 @@ from typing import Any
 
 from hackathon_sniper.deps import Deps
 from hackathon_sniper.models import HackathonEvent, Lifecycle
-from hackathon_sniper.notion.mapping import page_to_event, page_to_participation, page_to_profile
+from hackathon_sniper.notion.mapping import (
+    page_to_event,
+    page_to_participation,
+    page_to_profile,
+    participation_hackathon_ids,
+)
 from hackathon_sniper.state import GraphState
 
 logger = logging.getLogger(__name__)
@@ -47,8 +52,7 @@ def load_context(state: GraphState, deps: Deps) -> dict[str, Any]:
             winner.notion_page_id,
         )
         existing[ev.canonical_url] = winner
-    history = [
-        page_to_participation(page, names_by_id)
-        for page in deps.notion.query_all(s.notion_participations_db_id)
-    ]
-    return {"profile": profile, "existing": existing, "history": history}
+    participations = deps.notion.query_all(s.notion_participations_db_id)
+    history = [page_to_participation(page, names_by_id) for page in participations]
+    linked = {pid for page in participations for pid in participation_hackathon_ids(page)}
+    return {"profile": profile, "existing": existing, "history": history, "linked": linked}
